@@ -1,6 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server';
+﻿import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/service-role';
+import { getSupabaseAdmin } from '@/lib/supabase/service-role';
 
 export const runtime = 'nodejs';
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { data: authData, error: authError } =
-    await supabaseAdmin.auth.admin.createUser({
+    await getSupabaseAdmin().auth.admin.createUser({
       email,
       password,
       email_confirm: true,
@@ -81,14 +81,14 @@ export async function POST(request: NextRequest) {
 
   // The on_auth_user_created trigger auto-inserts a profile (with full_name)
   // and assigns a default 'supervisor' role. Update both to the requested values.
-  await supabaseAdmin
+  await getSupabaseAdmin()
     .from('profiles')
     .update({ full_name })
     .eq('id', userId);
 
   // If an admin role was requested, promote from the default supervisor role.
   if (role === 'admin') {
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('user_roles')
       .update({ role: 'admin' })
       .eq('user_id', userId)
@@ -100,3 +100,4 @@ export async function POST(request: NextRequest) {
     { status: 201 }
   );
 }
+
