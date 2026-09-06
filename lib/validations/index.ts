@@ -1,0 +1,63 @@
+import { z } from 'zod';
+
+export const siteSchema = z.object({
+  site_name: z.string().min(1, 'Site name is required'),
+  address: z.string().min(1, 'Address is required'),
+  supervisor_id: z.string().uuid().optional().or(z.literal('')),
+  status: z.enum(['Active', 'Inactive']).default('Active'),
+});
+
+export type SiteFormValues = z.infer<typeof siteSchema>;
+
+export const workerSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  mobile: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || /^[0-9+\-\s()]{7,15}$/.test(v),
+      'Enter a valid mobile number'
+    ),
+  address: z.string().optional(),
+  aadhaar: z.string().optional(),
+  trade: z.string().min(1, 'Trade is required'),
+  daily_wage: z.coerce
+    .number()
+    .min(0, 'Daily wage must be 0 or greater')
+    .optional()
+    .nullable(),
+  joining_date: z.string().optional().nullable(),
+  site_id: z.string().uuid('Site is required'),
+  working_place: z.string().optional(),
+  work_type: z.string().optional(),
+  working_since: z.string().optional().nullable(),
+  status: z.enum(['Active', 'Inactive']).default('Active'),
+});
+
+export type WorkerFormValues = z.infer<typeof workerSchema>;
+
+export const salaryAdvanceSchema = z.object({
+  worker_id: z.string().uuid('Worker is required'),
+  amount: z.coerce.number().positive('Amount must be greater than 0'),
+  request_date: z.string().min(1, 'Date is required'),
+  reason: z.string().min(1, 'Reason is required'),
+  remarks: z.string().optional(),
+});
+
+export type SalaryAdvanceFormValues = z.infer<typeof salaryAdvanceSchema>;
+
+export const profileSchema = z.object({
+  full_name: z.string().min(1, 'Full name is required'),
+  mobile: z.string().optional(),
+});
+
+export type ProfileFormValues = z.infer<typeof profileSchema>;
+
+export const inviteUserSchema = z.object({
+  email: z.string().email('Valid email is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  full_name: z.string().min(1, 'Full name is required'),
+  role: z.enum(['admin', 'supervisor']),
+});
+
+export type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
