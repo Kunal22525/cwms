@@ -9,23 +9,34 @@ import {
   Info,
   Loader2,
   HardHat,
+  Building2,
+  Upload,
+  ImageOff,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useCompanySettings } from '@/lib/company-settings';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { profileSchema } from '@/lib/validations';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+
+const LOGO_MAX_SIZE = 2 * 1024 * 1024;
+const LOGO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
 
 export default function SettingsPage() {
   const { profile, user, role, refreshProfile } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: company, isLoading: companyLoading } = useCompanySettings();
 
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [mobile, setMobile] = useState(profile?.mobile ?? '');
@@ -35,6 +46,16 @@ export default function SettingsPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  const [companyName, setCompanyName] = useState(company?.company_name ?? '');
+  const [tagline, setTagline] = useState(company?.tagline ?? '');
+  const [companyPhone, setCompanyPhone] = useState(company?.phone ?? '');
+  const [companyEmail, setCompanyEmail] = useState(company?.email ?? '');
+  const [companyAddress, setCompanyAddress] = useState(company?.address ?? '');
+  const [companyGst, setCompanyGst] = useState(company?.gst_number ?? '');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(company?.logo_url ?? null);
+  const [savingCompany, setSavingCompany] = useState(false);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,6 +117,85 @@ export default function SettingsPage() {
     }
   };
 
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid file type',
+        description: 'Only JPG, PNG, WebP and SVG images are allowed.',
+      });
+      return;
+    }
+    if (file.size > LOGO_MAX_SIZE) {
+      toast({
+        variant: 'destructive',
+        title: 'File too large',
+        description: 'Logo must be under 2MB.',
+      });
+      return;
+    }
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const handleSaveCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCompany(true);
+    try {
+      let logoUrl = logoPreview;
+
+      if (logoFile) {
+        const ext = logoFile.name.split('.').pop();
+        const filePath = `logo.${ext}`;
+
+        // Remove any existing logo file
+        if (company?.logo_url) {
+          const oldName = company.logo_url.split('/').pop();
+          if (oldName && oldName !== filePath) {
+            await supabase.storage.from('company-assets').remove([oldName]);
+          }
+        }
+
+        const { error: uploadError } = await supabase.storage
+          .from('company-assets')
+          .upload(filePath, logoFile, { upsert: true });
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from('company-assets')
+          .getPublicUrl(filePath);
+        logoUrl = urlData.publicUrl;
+      }
+
+      const { error } = await supabase.from('company_settings').upsert(
+        {
+          id: true,
+          company_name: companyName.trim() || 'Construction Workforce Manager',
+          tagline: tagline.trim(),
+          phone: companyPhone.trim() || null,
+          email: companyEmail.trim() || null,
+          address: companyAddress.trim() || null,
+          gst_number: companyGst.trim() || null,
+          logo_url: logoUrl ?? null,
+        },
+        { onConflict: 'id' }
+      );
+
+      if (error) throw error;
+
+      toast({ title: 'Company updated', description: 'Company settings have been saved.' });
+      queryClient.invalidateQueries({ queryKey: ['company-settings'] });
+      setLogoFile(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Save failed', description: message });
+    } finally {
+      setSavingCompany(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader title="Settings" description="Manage your account and application preferences" />
@@ -110,6 +210,12 @@ export default function SettingsPage() {
             <Lock className="h-3.5 w-3.5" />
             Password
           </TabsTrigger>
+          {role === 'admin' && (
+            <TabsTrigger value="company" className="gap-1.5">
+              <Building2 className="h-3.5 w-3.5" />
+              Company
+            </TabsTrigger>
+          )}
           <TabsTrigger value="about" className="gap-1.5">
             <Info className="h-3.5 w-3.5" />
             About
@@ -212,10 +318,19 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-                  <HardHat className="h-7 w-7 text-primary" />
+                  {company?.logo_url ? (
+                    <Avatar className="h-14 w-14 rounded-xl">
+                      <AvatarImage src={company.logo_url} alt="Company logo" />
+                      <AvatarFallback>
+                        <HardHat className="h-7 w-7 text-primary" />
+                      </AvatarFallback>
+                    </Avatar>
+                  ) : (
+                    <HardHat className="h-7 w-7 text-primary" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-lg font-bold">Construction Workforce Management System</p>
+                  <p className="text-lg font-bold">{company?.company_name ?? 'Construction Workforce Manager'}</p>
                   <p className="text-sm text-muted-foreground">Version 1.0</p>
                 </div>
               </div>
@@ -240,6 +355,126 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Company Tab (admin only) */}
+        {role === 'admin' && (
+          <TabsContent value="company">
+            <Card className="max-w-lg border-border/60">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  Company Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {companyLoading ? (
+                  <Skeleton className="h-40 w-full" />
+                ) : (
+                  <form onSubmit={handleSaveCompany} className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <Avatar className="h-16 w-16 rounded-xl">
+                        {logoPreview ? (
+                          <AvatarImage src={logoPreview} alt="Company logo" />
+                        ) : null}
+                        <AvatarFallback className="rounded-xl">
+                          <HardHat className="h-8 w-8 text-muted-foreground" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="logo" className="cursor-pointer">
+                          <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent">
+                            <Upload className="h-4 w-4" />
+                            {logoPreview ? 'Replace Logo' : 'Upload Logo'}
+                          </div>
+                          <Input
+                            id="logo"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                            className="hidden"
+                            onChange={handleLogoSelect}
+                          />
+                        </Label>
+                        {logoPreview && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setLogoFile(null);
+                              setLogoPreview(null);
+                            }}
+                          >
+                            <ImageOff className="mr-1 h-4 w-4" />
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Company Name</Label>
+                      <Input
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        placeholder="e.g. Sharma Constructions Pvt. Ltd."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tagline</Label>
+                      <Input
+                        value={tagline}
+                        onChange={(e) => setTagline(e.target.value)}
+                        placeholder="e.g. Workforce Management System"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phone</Label>
+                      <Input
+                        value={companyPhone ?? ''}
+                        onChange={(e) => setCompanyPhone(e.target.value)}
+                        placeholder="Contact number"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        value={companyEmail ?? ''}
+                        onChange={(e) => setCompanyEmail(e.target.value)}
+                        placeholder="contact@company.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Address</Label>
+                      <Textarea
+                        value={companyAddress ?? ''}
+                        onChange={(e) => setCompanyAddress(e.target.value)}
+                        rows={2}
+                        placeholder="Registered / office address"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>GST Number</Label>
+                      <Input
+                        value={companyGst ?? ''}
+                        onChange={(e) => setCompanyGst(e.target.value)}
+                        placeholder="e.g. 22AAAAA0000A1Z5"
+                      />
+                    </div>
+
+                    <Button type="submit" disabled={savingCompany}>
+                      {savingCompany && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Save Company
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Logo and company name appear on the login screen, sidebar and all exported Excel reports.
+                    </p>
+                  </form>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

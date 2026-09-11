@@ -13,6 +13,7 @@ import {
   Loader2,
   Upload,
   X,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -46,6 +47,17 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
@@ -64,6 +76,7 @@ export default function WorkersPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
+  const [deleteWorker, setDeleteWorker] = useState<Worker | null>(null);
   const [search, setSearch] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
   const [tradeFilter, setTradeFilter] = useState('all');
@@ -87,6 +100,7 @@ export default function WorkersPage() {
     work_type: '',
     working_since: '',
     status: 'Active',
+    is_temporary: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -165,6 +179,7 @@ export default function WorkersPage() {
       work_type: '',
       working_since: '',
       status: 'Active',
+      is_temporary: false,
     });
     setErrors({});
     setPhotoFile(null);
@@ -188,6 +203,7 @@ export default function WorkersPage() {
       work_type: worker.work_type ?? '',
       working_since: worker.working_since ?? '',
       status: worker.status,
+      is_temporary: worker.is_temporary ?? false,
     });
     setErrors({});
     setPhotoFile(null);
@@ -277,6 +293,7 @@ export default function WorkersPage() {
         work_type: form.work_type || null,
         working_since: form.working_since || null,
         status: form.status,
+        is_temporary: form.is_temporary ?? false,
       };
 
       if (editingWorker) {
@@ -322,6 +339,24 @@ export default function WorkersPage() {
   };
 
   const canManage = role === 'admin';
+
+  const handleDelete = async () => {
+    if (!deleteWorker) return;
+    try {
+      const { error } = await supabase
+        .from('workers')
+        .delete()
+        .eq('id', deleteWorker.id);
+      if (error) throw error;
+      toast({ title: 'Worker deleted', description: `${deleteWorker.name} has been removed.` });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Delete failed', description: message });
+    }
+    setDeleteWorker(null);
+  };
 
   return (
     <div>
@@ -370,7 +405,7 @@ export default function WorkersPage() {
             <SelectValue placeholder="All Trades" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Trades</SelectItem>
+            <SelectItem value="all">All Roles</SelectItem>
             {trades?.map((t) => (
               <SelectItem key={t} value={t}>{t}</SelectItem>
             ))}
@@ -416,7 +451,7 @@ export default function WorkersPage() {
               <TableRow>
                 <TableHead>Code</TableHead>
                 <TableHead>Name</TableHead>
-                <TableHead className="hidden md:table-cell">Trade</TableHead>
+                <TableHead className="hidden md:table-cell">Role</TableHead>
                 <TableHead className="hidden lg:table-cell">Site</TableHead>
                 <TableHead className="hidden md:table-cell">Wage</TableHead>
                 <TableHead>Status</TableHead>
@@ -438,6 +473,11 @@ export default function WorkersPage() {
                         </AvatarFallback>
                       </Avatar>
                       <span className="font-medium">{worker.name}</span>
+                      {worker.is_temporary && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          Temp
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">
@@ -460,13 +500,22 @@ export default function WorkersPage() {
                         </Link>
                       </Button>
                       {canManage && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEditDialog(worker)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openEditDialog(worker)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteWorker(worker)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   </TableCell>
@@ -598,13 +647,19 @@ export default function WorkersPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="trade">Trade</Label>
+                <Label htmlFor="trade">Role</Label>
                 <Input
                   id="trade"
+                  list="roles-list"
                   value={form.trade}
                   onChange={(e) => setForm({ ...form, trade: e.target.value })}
                   placeholder="e.g. Mason, Electrician"
                 />
+                <datalist id="roles-list">
+                  {trades?.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
                 {errors.trade && <p className="text-xs text-destructive">{errors.trade}</p>}
               </div>
             </div>
@@ -698,6 +753,21 @@ export default function WorkersPage() {
               </Select>
             </div>
 
+            <label className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2.5 cursor-pointer">
+              <Input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={form.is_temporary ?? false}
+                onChange={(e) => setForm({ ...form, is_temporary: e.target.checked })}
+              />
+              <span className="text-sm font-medium">
+                Temporary worker
+                <span className="ml-1 text-xs text-muted-foreground">
+                  (excluded from salary sheet, listed at the end of exports)
+                </span>
+              </span>
+            </label>
+
             <DialogFooter>
               <Button
                 type="button"
@@ -715,6 +785,30 @@ export default function WorkersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Worker Confirmation */}
+      <AlertDialog open={!!deleteWorker} onOpenChange={(open) => !open && setDeleteWorker(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete worker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &quot;{deleteWorker?.name}&quot;
+              {deleteWorker?.worker_code ? ` (${deleteWorker.worker_code})` : ''}.
+              Attendance and advance history for this worker will appear as{" "}
+              removed, but can no longer be managed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

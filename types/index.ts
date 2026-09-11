@@ -31,6 +31,11 @@ export interface Site {
   site_code: string;
   site_name: string;
   address: string | null;
+  gst_number: string | null;
+  client_name: string | null;
+  contact_number_2: string | null;
+  working_from: string | null;
+  working_to: string | null;
   supervisor_id: string | null;
   status: SiteStatus;
   created_at: string;
@@ -51,6 +56,7 @@ export interface Worker {
   joining_date: string | null;
   site_id: string | null;
   photo_url: string | null;
+  is_temporary: boolean;
   status: WorkerStatus;
   working_place: string | null;
   work_type: string | null;
@@ -68,6 +74,9 @@ export interface Attendance {
   attendance_time: string;
   shift: AttendanceShift;
   status: AttendanceStatus;
+  overtime: number;
+  deduction: number;
+  leave_type: 'Paid' | 'Unpaid' | null;
   supervisor_id: string | null;
   created_at: string;
   updated_at: string;
@@ -104,4 +113,16 @@ export interface ReportLog {
 
 export interface UserWithRole extends Profile {
   role: AppRole;
+}
+
+export interface CompanySettings {
+  id: boolean;
+  company_name: string;
+  tagline: string;
+  logo_url: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  gst_number: string | null;
+  updated_at: string;
 }

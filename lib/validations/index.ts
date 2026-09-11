@@ -1,8 +1,20 @@
 import { z } from 'zod';
 
 export const siteSchema = z.object({
+  site_code: z.string().min(1, 'Site code is required'),
   site_name: z.string().min(1, 'Site name is required'),
   address: z.string().min(1, 'Address is required'),
+  gst_number: z.string().optional(),
+  client_name: z.string().optional(),
+  contact_number_2: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || /^[0-9+\-\s()]{7,15}$/.test(v),
+      'Enter a valid phone number'
+    ),
+  working_from: z.string().optional(),
+  working_to: z.string().optional(),
   supervisor_id: z.string().uuid().optional().or(z.literal('')),
   status: z.enum(['Active', 'Inactive']).default('Active'),
 });
@@ -31,6 +43,7 @@ export const workerSchema = z.object({
   working_place: z.string().optional(),
   work_type: z.string().optional(),
   working_since: z.string().optional().nullable(),
+  is_temporary: z.boolean().optional().default(false),
   status: z.enum(['Active', 'Inactive']).default('Active'),
 });
 
@@ -57,6 +70,7 @@ export const inviteUserSchema = z.object({
   email: z.string().email('Valid email is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   full_name: z.string().min(1, 'Full name is required'),
+  mobile: z.string().optional(),
   role: z.enum(['admin', 'supervisor']),
 });
 

@@ -15,12 +15,14 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { initials } from '@/lib/utils';
+import { useCompanySettings } from '@/lib/company-settings';
 import { useToast } from '@/hooks/use-toast';
 
 export function TopBar() {
   const { user, profile, role, signOut } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const { data: company } = useCompanySettings();
 
   const handleSignOut = async () => {
     await signOut();
@@ -34,8 +36,8 @@ export function TopBar() {
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-sm lg:px-6">
       <div className="flex items-center">
-        <h2 className="text-sm font-medium text-muted-foreground lg:hidden">
-          CWMS
+        <h2 className="truncate text-sm font-medium text-muted-foreground lg:hidden">
+          {company?.company_name ?? 'CWMS'}
         </h2>
       </div>
 

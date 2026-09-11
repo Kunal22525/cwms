@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useCompanySettings } from '@/lib/company-settings';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 interface NavItem {
   label: string;
@@ -38,6 +40,7 @@ const navItems: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { role } = useAuth();
+  const { data: company } = useCompanySettings();
 
   const visibleItems = navItems.filter(
     (item) => !item.adminOnly || role === 'admin'
@@ -48,11 +51,24 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          <HardHat className="h-5 w-5 text-primary" />
+          {company?.logo_url ? (
+            <Avatar className="h-8 w-8">
+              <AvatarImage src={company.logo_url} alt="Company logo" className="object-contain" />
+              <AvatarFallback>
+                <HardHat className="h-5 w-5 text-primary" />
+              </AvatarFallback>
+            </Avatar>
+          ) : (
+            <HardHat className="h-5 w-5 text-primary" />
+          )}
         </div>
         <div className="flex flex-col">
-          <span className="text-sm font-bold text-foreground">CWMS</span>
-          <span className="text-[10px] text-muted-foreground">Workforce Manager</span>
+          <span className="max-w-[9rem] truncate text-sm font-bold text-foreground">
+            {company?.company_name ?? 'CWMS'}
+          </span>
+          <span className="max-w-[9rem] truncate text-[10px] text-muted-foreground">
+            {company?.tagline ?? 'Workforce Manager'}
+          </span>
         </div>
       </div>
 

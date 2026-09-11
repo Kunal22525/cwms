@@ -8,6 +8,7 @@ import {
   Loader2,
   Shield,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -65,13 +66,16 @@ export default function UsersPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleChangeUser, setRoleChangeUser] = useState<{ profile: Profile; currentRole: AppRole } | null>(null);
+  const [deleteUser, setDeleteUser] = useState<Profile | null>(null);
 
   const [form, setForm] = useState<InviteUserFormValues>({
     email: '',
     password: '',
     full_name: '',
+    mobile: '',
     role: 'supervisor',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -143,12 +147,39 @@ export default function UsersPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setDialogOpen(false);
-      setForm({ email: '', password: '', full_name: '', role: 'supervisor' });
+      setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       toast({ variant: 'destructive', title: 'Failed to create user', description: message });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteUser) return;
+    setDeletingId(deleteUser.id);
+    try {
+      const res = await fetch('/api/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: deleteUser.id }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete user');
+      }
+
+      toast({ title: 'User deleted', description: `${deleteUser.full_name} has been removed.` });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Delete failed', description: message });
+    } finally {
+      setDeletingId(null);
+      setDeleteUser(null);
     }
   };
 
@@ -192,7 +223,7 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader title="Users" description="Manage system users and their roles">
-        <Button onClick={() => { setForm({ email: '', password: '', full_name: '', role: 'supervisor' }); setErrors({}); setDialogOpen(true); }}>
+        <Button onClick={() => { setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor' }); setErrors({}); setDialogOpen(true); }}>
           <Plus className="mr-2 h-4 w-4" />
           Add User
         </Button>
@@ -229,6 +260,7 @@ export default function UsersPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead className="hidden md:table-cell">Mobile</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead className="hidden md:table-cell">Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -246,6 +278,7 @@ export default function UsersPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                  <TableCell className="hidden md:table-cell text-muted-foreground">{u.mobile ?? '—'}</TableCell>
                   <TableCell>
                     <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="capitalize">
                       {u.role}
@@ -255,14 +288,28 @@ export default function UsersPage() {
                     {formatDate(u.created_at)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setRoleChangeUser({ profile: u, currentRole: u.role })}
-                    >
-                      <Shield className="mr-1 h-4 w-4" />
-                      Change Role
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRoleChangeUser({ profile: u, currentRole: u.role })}
+                      >
+                        <Shield className="mr-1 h-4 w-4" />
+                        Change Role
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={deletingId === u.id}
+                        onClick={() => setDeleteUser(u)}
+                      >
+                        {deletingId === u.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        )}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -311,6 +358,16 @@ export default function UsersPage() {
               {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
             </div>
             <div className="space-y-2">
+              <Label htmlFor="mobile">Mobile Number</Label>
+              <Input
+                id="mobile"
+                value={form.mobile ?? ''}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+                placeholder="Optional contact number"
+              />
+              {errors.mobile && <p className="text-xs text-destructive">{errors.mobile}</p>}
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
               <Select
                 value={form.role}
@@ -355,6 +412,28 @@ export default function UsersPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleRoleChange}>
               Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete User Confirmation */}
+      <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove &quot;{deleteUser?.full_name}&quot; ({deleteUser?.email}).
+              They will no longer be able to sign in, and their assigned sites will be unassigned.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

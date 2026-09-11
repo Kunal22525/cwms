@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { HardHat, Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useCompanySettings } from '@/lib/company-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,12 +17,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 
 export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const { toast } = useToast();
+  const { data: company } = useCompanySettings();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -100,13 +103,22 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-            <HardHat className="h-8 w-8 text-primary" />
+            {company?.logo_url ? (
+              <Avatar className="h-16 w-16 rounded-2xl">
+                <AvatarImage src={company.logo_url} alt="Company logo" className="object-contain" />
+                <AvatarFallback>
+                  <HardHat className="h-8 w-8 text-primary" />
+                </AvatarFallback>
+              </Avatar>
+            ) : (
+              <HardHat className="h-8 w-8 text-primary" />
+            )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Construction Workforce
+            {company?.company_name ?? 'Construction Workforce'}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Management System
+            {company?.tagline ?? 'Management System'}
           </p>
         </div>
 

@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
-import { MapPin, Plus, Search, Pencil, Power, PowerOff, Loader2 } from 'lucide-react';
+import { MapPin, Plus, Search, Pencil, Power, PowerOff, Loader2, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { PageHeader } from '@/components/layout/page-header';
@@ -61,15 +61,22 @@ export default function SitesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSite, setEditingSite] = useState<Site | null>(null);
   const [toggleSite, setToggleSite] = useState<Site | null>(null);
+  const [deleteSite, setDeleteSite] = useState<Site | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState<SiteFormValues>({
+    site_code: '',
     site_name: '',
     address: '',
     supervisor_id: '',
     status: 'Active',
+    gst_number: '',
+    client_name: '',
+    contact_number_2: '',
+    working_from: '',
+    working_to: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -124,7 +131,18 @@ export default function SitesPage() {
 
   const openNewDialog = () => {
     setEditingSite(null);
-    setForm({ site_name: '', address: '', supervisor_id: '', status: 'Active' });
+    setForm({
+      site_code: '',
+      site_name: '',
+      address: '',
+      supervisor_id: '',
+      status: 'Active',
+      gst_number: '',
+      client_name: '',
+      contact_number_2: '',
+      working_from: '',
+      working_to: '',
+    });
     setErrors({});
     setDialogOpen(true);
   };
@@ -132,10 +150,16 @@ export default function SitesPage() {
   const openEditDialog = (site: Site) => {
     setEditingSite(site);
     setForm({
+      site_code: site.site_code,
       site_name: site.site_name,
       address: site.address ?? '',
       supervisor_id: site.supervisor_id ?? '',
       status: site.status,
+      gst_number: site.gst_number ?? '',
+      client_name: site.client_name ?? '',
+      contact_number_2: site.contact_number_2 ?? '',
+      working_from: site.working_from ?? '',
+      working_to: site.working_to ?? '',
     });
     setErrors({});
     setDialogOpen(true);
@@ -169,10 +193,16 @@ export default function SitesPage() {
     setSubmitting(true);
     try {
       const payload = {
+        site_code: form.site_code,
         site_name: form.site_name,
         address: form.address,
         supervisor_id: form.supervisor_id || null,
         status: form.status,
+        gst_number: form.gst_number || null,
+        client_name: form.client_name || null,
+        contact_number_2: form.contact_number_2 || null,
+        working_from: form.working_from || null,
+        working_to: form.working_to || null,
       };
 
       if (editingSite) {
@@ -183,12 +213,9 @@ export default function SitesPage() {
         if (error) throw error;
         toast({ title: 'Site updated', description: `${form.site_name} has been updated.` });
       } else {
-        const { data: codeData, error: codeError } = await supabase.rpc('generate_site_code');
-        if (codeError) throw codeError;
-
         const { error } = await supabase
           .from('sites')
-          .insert({ ...payload, site_code: codeData as string });
+          .insert(payload);
         if (error) throw error;
         toast({ title: 'Site created', description: `${form.site_name} has been added.` });
       }
@@ -222,6 +249,23 @@ export default function SitesPage() {
       toast({ variant: 'destructive', title: 'Action failed', description: message });
     }
     setToggleSite(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteSite) return;
+    try {
+      const { error } = await supabase
+        .from('sites')
+        .delete()
+        .eq('id', deleteSite.id);
+      if (error) throw error;
+      toast({ title: 'Site deleted', description: `${deleteSite.site_name} has been permanently deleted.` });
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Delete failed', description: message });
+    }
+    setDeleteSite(null);
   };
 
   if (role !== 'admin') {
@@ -295,11 +339,11 @@ export default function SitesPage() {
               <TableRow>
                 <TableHead>Code</TableHead>
                 <TableHead>Name</TableHead>
+                <TableHead className="hidden xl:table-cell">Client</TableHead>
                 <TableHead className="hidden md:table-cell">Address</TableHead>
                 <TableHead>Supervisor</TableHead>
                 <TableHead className="text-center">Workers</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="hidden lg:table-cell">Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -308,6 +352,9 @@ export default function SitesPage() {
                 <TableRow key={site.id}>
                   <TableCell className="font-mono text-xs">{site.site_code}</TableCell>
                   <TableCell className="font-medium">{site.site_name}</TableCell>
+                  <TableCell className="hidden max-w-[10rem] truncate xl:table-cell text-muted-foreground">
+                    {site.client_name ?? '—'}
+                  </TableCell>
                   <TableCell className="hidden max-w-xs truncate md:table-cell text-muted-foreground">
                     {site.address ?? '—'}
                   </TableCell>
@@ -319,9 +366,6 @@ export default function SitesPage() {
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={site.status} />
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-                    {formatDate(site.created_at)}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
@@ -343,6 +387,13 @@ export default function SitesPage() {
                           <Power className="h-4 w-4 text-success" />
                         )}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleteSite(site)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -360,10 +411,22 @@ export default function SitesPage() {
             <DialogDescription>
               {editingSite
                 ? 'Update site details below.'
-                : 'Create a new construction site. Site code will be generated automatically.'}
+                : 'Create a new construction site. Site code is provided by you.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="site_code">Site Code</Label>
+              <Input
+                id="site_code"
+                value={form.site_code}
+                onChange={(e) => setForm({ ...form, site_code: e.target.value })}
+                placeholder="e.g. DT-001"
+              />
+              {errors.site_code && (
+                <p className="text-xs text-destructive">{errors.site_code}</p>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="site_name">Site Name</Label>
               <Input
@@ -377,6 +440,15 @@ export default function SitesPage() {
               )}
             </div>
             <div className="space-y-2">
+              <Label htmlFor="client_name">Client Name</Label>
+              <Input
+                id="client_name"
+                value={form.client_name}
+                onChange={(e) => setForm({ ...form, client_name: e.target.value })}
+                placeholder="e.g. ABC Builders & Sons"
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="address">Address</Label>
               <Textarea
                 id="address"
@@ -388,6 +460,44 @@ export default function SitesPage() {
               {errors.address && (
                 <p className="text-xs text-destructive">{errors.address}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gst_number">GST Number</Label>
+              <Input
+                id="gst_number"
+                value={form.gst_number}
+                onChange={(e) => setForm({ ...form, gst_number: e.target.value })}
+                placeholder="e.g. 22AAAAA0000A1Z5"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact_number_2">Contact Number (2nd)</Label>
+              <Input
+                id="contact_number_2"
+                value={form.contact_number_2}
+                onChange={(e) => setForm({ ...form, contact_number_2: e.target.value })}
+                placeholder="Additional contact number"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="working_from">Working From</Label>
+                <Input
+                  id="working_from"
+                  type="date"
+                  value={form.working_from}
+                  onChange={(e) => setForm({ ...form, working_from: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="working_to">Working To</Label>
+                <Input
+                  id="working_to"
+                  type="date"
+                  value={form.working_to}
+                  onChange={(e) => setForm({ ...form, working_to: e.target.value })}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="supervisor">Assign Supervisor</Label>
@@ -460,6 +570,28 @@ export default function SitesPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleToggleStatus}>
               {toggleSite?.status === 'Active' ? 'Deactivate' : 'Reactivate'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Site Confirmation */}
+      <AlertDialog open={!!deleteSite} onOpenChange={(open) => !open && setDeleteSite(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete site?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &quot;{deleteSite?.site_name}&quot;. Workers, attendance and
+              advances linked to this site will remain but the site itself will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

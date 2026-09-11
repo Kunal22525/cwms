@@ -13,8 +13,9 @@ import {
   CalendarPlus,
   MapPinPlus,
   FilePlus,
-  TrendingUp,
-  AlertCircle,
+  CalendarDays,
+  Check,
+  Minus,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -26,65 +27,37 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from 'recharts';
-
-const CHART_COLORS = [
-  'hsl(213 94% 56%)',
-  'hsl(24 95% 53%)',
-  'hsl(142 71% 45%)',
-  'hsl(0 72% 51%)',
-  'hsl(280 65% 60%)',
-];
 
 export default function DashboardPage() {
   const { role, user } = useAuth();
 
+  const today = new Date().toISOString().split('T')[0];
+  const monthPrefix = today.slice(0, 7);
+
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
-      const today = new Date().toISOString().split('T')[0];
-
-      let siteFilter: string | null = null;
-      if (role !== 'admin') {
-        const { data: siteData } = await supabase
-          .from('sites')
-          .select('id')
-          .eq('supervisor_id', user?.id)
-          .maybeSingle();
-        siteFilter = siteData?.id ?? null;
-      }
+      const todayStr = new Date().toISOString().split('T')[0];
 
       const [workersRes, sitesRes, attendanceRes, advancesRes] = await Promise.all([
         supabase.from('workers').select('id', { count: 'exact', head: true }),
         supabase.from('sites').select('id', { count: 'exact', head: true }),
         supabase
           .from('attendance')
-          .select('status')
-          .eq('attendance_date', today),
+          .select('status, overtime')
+          .eq('attendance_date', todayStr),
         supabase
           .from('salary_advances')
           .select('status, amount')
           .eq('status', 'Pending'),
       ]);
 
-      const todayAttendance = (attendanceRes.data as { status: string }[]) ?? [];
+      const todayAttendance = (attendanceRes.data as { status: string; overtime: number | null }[]) ?? [];
       const presentToday = todayAttendance.filter((a: { status: string }) => a.status === 'Present').length;
       const absentToday = todayAttendance.filter((a: { status: string }) => a.status === 'Absent').length;
       const halfDayToday = todayAttendance.filter((a: { status: string }) => a.status === 'Half Day').length;
+      const leaveToday = todayAttendance.filter((a: { status: string }) => a.status === 'Leave').length;
+      const otToday = todayAttendance.reduce((s: number, a: { status: string; overtime: number | null }) => s + (a.overtime ?? 0), 0);
 
       return {
         totalWorkers: workersRes.count ?? 0,
@@ -92,17 +65,40 @@ export default function DashboardPage() {
         presentToday,
         absentToday,
         halfDayToday,
+        leaveToday,
+        otToday,
         pendingAdvances: advancesRes.data?.length ?? 0,
-        siteFilter,
       };
     },
     enabled: !!user,
   });
 
-  const { data: attendanceTrend } = useQuery({
-    queryKey: ['attendance-trend'],
+  const { data: monthStats } = useQuery({
+    queryKey: ['month-attendance-stats', monthPrefix],
     queryFn: async () => {
-      const days: { date: string; label: string; Present: number; Absent: number; 'Half Day': number }[] = [];
+      const { data } = await supabase
+        .from('attendance')
+        .select('status, overtime, deduction, leave_type')
+        .gte('attendance_date', `${monthPrefix}-01`)
+        .lte('attendance_date', today);
+      const rows = (data as { status: string; overtime: number | null; deduction: number | null; leave_type: string | null }[]) ?? [];
+      return {
+        present: rows.filter((r) => r.status === 'Present').length,
+        absent: rows.filter((r) => r.status === 'Absent').length,
+        halfDay: rows.filter((r) => r.status === 'Half Day').length,
+        paidLeave: rows.filter((r) => r.status === 'Leave' && r.leave_type === 'Paid').length,
+        unpaidLeave: rows.filter((r) => r.status === 'Leave' && r.leave_type !== 'Paid').length,
+        overtime: rows.reduce((s, r) => s + (r.overtime ?? 0), 0),
+        deductions: rows.reduce((s, r) => s + (r.deduction ?? 0), 0),
+      };
+    },
+    enabled: !!user,
+  });
+
+  const { data: weekAttendance } = useQuery({
+    queryKey: ['week-attendance'],
+    queryFn: async () => {
+      const days: { date: string; label: string; Present: number; Absent: number; 'Half Day': number; Leave: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
@@ -114,10 +110,11 @@ export default function DashboardPage() {
         const statuses = (data as { status: string }[]) ?? [];
         days.push({
           date: dateStr,
-          label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+          label: d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }),
           Present: statuses.filter((s: { status: string }) => s.status === 'Present').length,
           Absent: statuses.filter((s: { status: string }) => s.status === 'Absent').length,
           'Half Day': statuses.filter((s: { status: string }) => s.status === 'Half Day').length,
+          Leave: statuses.filter((s: { status: string }) => s.status === 'Leave').length,
         });
       }
       return days;
@@ -146,25 +143,6 @@ export default function DashboardPage() {
       return result;
     },
     enabled: !!user && role === 'admin',
-  });
-
-  const { data: attendanceDistribution } = useQuery({
-    queryKey: ['attendance-distribution'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('attendance')
-        .select('status')
-        .order('created_at', { ascending: false })
-        .limit(500);
-      const statuses = (data as { status: string }[]) ?? [];
-      return [
-        { name: 'Present', value: statuses.filter((s: { status: string }) => s.status === 'Present').length },
-        { name: 'Absent', value: statuses.filter((s: { status: string }) => s.status === 'Absent').length },
-        { name: 'Half Day', value: statuses.filter((s: { status: string }) => s.status === 'Half Day').length },
-        { name: 'Leave', value: statuses.filter((s: { status: string }) => s.status === 'Leave').length },
-      ].filter((s) => s.value > 0);
-    },
-    enabled: !!user,
   });
 
   const { data: advanceSummary } = useQuery({
@@ -238,19 +216,27 @@ export default function DashboardPage() {
             <Skeleton key={i} className="h-28 rounded-xl" />
           ))}
         </div>
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Skeleton className="h-72 rounded-xl" />
-          <Skeleton className="h-72 rounded-xl" />
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <Skeleton className="h-48 rounded-xl" />
+          <Skeleton className="h-48 rounded-xl" />
+          <Skeleton className="h-48 rounded-xl" />
         </div>
       </div>
     );
   }
 
+  const kpiRow = (label: string, value: number | string, colorClass = 'text-foreground') => (
+    <div className="rounded-lg border border-border/60 bg-card p-3 text-center">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`text-xl font-bold ${colorClass}`}>{value}</p>
+    </div>
+  );
+
   return (
     <div>
       <PageHeader title="Dashboard" description="Overview of your construction operations" />
 
-      {/* Stat Cards */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Total Workers" value={stats?.totalWorkers ?? 0} icon={Users} />
         <StatCard label="Active Sites" value={stats?.activeSites ?? 0} icon={MapPin} iconColor="text-accent" iconBg="bg-accent/10" />
@@ -290,147 +276,130 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* Charts */}
+      {/* Attendance Status: Today + Current Month */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Attendance Trend */}
         <Card className="border-border/60">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              Attendance Trend (7 Days)
+              <CalendarCheck className="h-4 w-4 text-primary" />
+              Today&apos;s Attendance Status
+              <span className="text-xs font-normal text-muted-foreground">({formatDate(today)})</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {attendanceTrend && attendanceTrend.some((d) => d.Present > 0 || d.Absent > 0) ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={attendanceTrend}>
-                  <defs>
-                    <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_COLORS[2]} stopOpacity={0.4} />
-                      <stop offset="95%" stopColor={CHART_COLORS[2]} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorAbsent" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_COLORS[3]} stopOpacity={0.4} />
-                      <stop offset="95%" stopColor={CHART_COLORS[3]} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 19% 17%)" />
-                  <XAxis dataKey="label" stroke="hsl(215 16% 60%)" fontSize={12} />
-                  <YAxis stroke="hsl(215 16% 60%)" fontSize={12} allowDecimals={false} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(222 18% 10%)',
-                      border: '1px solid hsl(217 19% 17%)',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Area type="monotone" dataKey="Present" stroke={CHART_COLORS[2]} fillOpacity={1} fill="url(#colorPresent)" />
-                  <Area type="monotone" dataKey="Absent" stroke={CHART_COLORS[3]} fillOpacity={1} fill="url(#colorAbsent)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState icon={TrendingUp} title="No attendance data" description="Attendance will appear here once records are added." className="py-8" />
-            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {kpiRow('Present', stats?.presentToday ?? 0, 'text-success')}
+              {kpiRow('Absent', stats?.absentToday ?? 0, 'text-destructive')}
+              {kpiRow('Half Day', stats?.halfDayToday ?? 0, 'text-warning')}
+              {kpiRow('Leave', stats?.leaveToday ?? 0, 'text-primary')}
+              {kpiRow('OT (hrs)', stats?.otToday ?? 0, 'text-accent')}
+              {kpiRow('Marked', (stats?.presentToday ?? 0) + (stats?.absentToday ?? 0) + (stats?.halfDayToday ?? 0) + (stats?.leaveToday ?? 0))}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Attendance Distribution */}
         <Card className="border-border/60">
           <CardHeader>
-            <CardTitle className="text-base">Attendance Status Distribution</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              Current Month Attendance
+              <span className="text-xs font-normal text-muted-foreground">(since {formatDate(`${monthPrefix}-01`)})</span>
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {attendanceDistribution && attendanceDistribution.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={attendanceDistribution}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={90}
-                    label={(entry) => `${entry.name}: ${entry.value}`}
-                  >
-                    {attendanceDistribution.map((_, i) => (
-                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(222 18% 10%)',
-                      border: '1px solid hsl(217 19% 17%)',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState icon={AlertCircle} title="No data" description="Attendance distribution will appear here." className="py-8" />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {kpiRow('Present', monthStats?.present ?? 0, 'text-success')}
+              {kpiRow('Absent', monthStats?.absent ?? 0, 'text-destructive')}
+              {kpiRow('Half Day', monthStats?.halfDay ?? 0, 'text-warning')}
+              {kpiRow('Paid Leave', monthStats?.paidLeave ?? 0, 'text-primary')}
+              {kpiRow('Unpaid Leave', monthStats?.unpaidLeave ?? 0, 'text-primary')}
+              {kpiRow('OT (hrs)', monthStats?.overtime ?? 0, 'text-accent')}
+            </div>
+            {(monthStats?.present ?? 0) > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Deductions this month: {formatCurrency(monthStats?.deductions ?? 0)}
+              </p>
             )}
           </CardContent>
         </Card>
+      </div>
 
-        {/* Site-wise Worker Count */}
+      {/* Last 7 Days Status */}
+      <Card className="mt-4 border-border/60">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Clock className="h-4 w-4 text-primary" />
+            Attendance Status – Last 7 Days
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {weekAttendance ? (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {weekAttendance.map((d) => (
+                <div key={d.date} className="rounded-lg border border-border/60 bg-card p-2 text-center">
+                  <p className="text-xs font-medium text-muted-foreground">{d.label}</p>
+                  <p className="mt-1 text-lg font-bold">{d.Present + d.Absent + d['Half Day'] + d.Leave}</p>
+                  <div className="mt-1 flex justify-center gap-1 text-[10px]">
+                    <span className="text-success">{d.Present}P</span>
+                    <span className="text-destructive">{d.Absent}A</span>
+                    <span className="text-warning">{d['Half Day']}H</span>
+                    <span className="text-primary">{d.Leave}L</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon={Check} title="No attendance data" className="py-6" />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* KPI Summary: Sites & Advances */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {role === 'admin' && (
           <Card className="border-border/60">
             <CardHeader>
-              <CardTitle className="text-base">Site-wise Worker Count</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MapPin className="h-4 w-4 text-primary" />
+                Site-wise Worker Count
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {siteWorkerCounts && siteWorkerCounts.some((s) => s.workers > 0) ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={siteWorkerCounts}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 19% 17%)" />
-                    <XAxis dataKey="name" stroke="hsl(215 16% 60%)" fontSize={11} />
-                    <YAxis stroke="hsl(215 16% 60%)" fontSize={12} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(222 18% 10%)',
-                        border: '1px solid hsl(217 19% 17%)',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                      }}
-                    />
-                    <Bar dataKey="workers" fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="space-y-2">
+                  {siteWorkerCounts.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+                      <span className="truncate text-sm">{s.name}</span>
+                      <span className="font-semibold">{s.workers} worker{s.workers === 1 ? '' : 's'}</span>
+                    </div>
+                  ))}
+                </div>
               ) : (
-                <EmptyState icon={MapPin} title="No sites" description="Add sites and assign workers to see data here." className="py-8" />
+                <EmptyState icon={MapPin} title="No sites" description="Add sites and assign workers to see data here." className="py-6" />
               )}
             </CardContent>
           </Card>
         )}
 
-        {/* Salary Advance Summary */}
         <Card className="border-border/60">
           <CardHeader>
-            <CardTitle className="text-base">Salary Advance Summary</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Wallet className="h-4 w-4 text-primary" />
+              Salary Advance Summary
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {advanceSummary && advanceSummary.some((a) => a.amount > 0) ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={advanceSummary} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 19% 17%)" />
-                  <XAxis type="number" stroke="hsl(215 16% 60%)" fontSize={12} />
-                  <YAxis dataKey="name" type="category" stroke="hsl(215 16% 60%)" fontSize={12} width={70} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(222 18% 10%)',
-                      border: '1px solid hsl(217 19% 17%)',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                    formatter={(value: number) => formatCurrency(value)}
-                  />
-                  <Bar dataKey="amount" fill={CHART_COLORS[1]} radius={[0, 6, 6, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="space-y-2">
+                {advanceSummary.map((a) => (
+                  <div key={a.name} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
+                    <span className="text-sm">{a.name}</span>
+                    <span className="font-semibold">{formatCurrency(a.amount)}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <EmptyState icon={Wallet} title="No advances" description="Salary advance data will appear here." className="py-8" />
+              <EmptyState icon={Minus} title="No advances" description="Salary advance data will appear here." className="py-6" />
             )}
           </CardContent>
         </Card>

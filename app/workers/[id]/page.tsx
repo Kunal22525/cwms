@@ -27,6 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -200,6 +201,11 @@ export default function WorkerDetailPage() {
               <div>
                 <p className="font-semibold">{worker.name}</p>
                 <StatusBadge status={worker.status} />
+                {worker.is_temporary && (
+                  <Badge variant="secondary" className="ml-2 text-[10px]">
+                    Temporary
+                  </Badge>
+                )}
               </div>
             </div>
             <InfoRow icon={Phone} label="Mobile" value={worker.mobile} />
@@ -217,7 +223,7 @@ export default function WorkerDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <InfoRow icon={HardHat} label="Trade" value={worker.trade} />
+            <InfoRow icon={HardHat} label="Role" value={worker.trade} />
             <InfoRow icon={Wallet} label="Daily Wage" value={worker.daily_wage ? formatCurrency(worker.daily_wage) : null} />
             <InfoRow icon={Calendar} label="Joining Date" value={formatDate(worker.joining_date)} />
             <InfoRow icon={MapPin} label="Current Site" value={worker.site?.site_name} />

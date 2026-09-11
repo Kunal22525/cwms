@@ -41,6 +41,15 @@ const STATUS_CONFIG: Record<AttendanceStatus, { icon: typeof Check; color: strin
   Leave: { icon: Minus, color: 'text-primary', activeColor: 'bg-primary text-white border-primary' },
 };
 
+type WorkerMark = {
+  status: AttendanceStatus;
+  overtime: number;
+  deduction: number;
+  leave_type: 'Paid' | 'Unpaid';
+};
+
+const EMPTY_MARK: WorkerMark = { status: 'Present', overtime: 0, deduction: 0, leave_type: 'Unpaid' };
+
 export default function AttendancePage() {
   const { role, user } = useAuth();
   const { toast } = useToast();
@@ -50,7 +59,7 @@ export default function AttendancePage() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedShift, setSelectedShift] = useState<'Day' | 'Night'>('Day');
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
-  const [statuses, setStatuses] = useState<Record<string, AttendanceStatus>>({});
+  const [marks, setMarks] = useState<Record<string, WorkerMark>>({});
   const [saving, setSaving] = useState(false);
 
   const { data: sites } = useQuery({
@@ -91,51 +100,69 @@ export default function AttendancePage() {
   // Load existing attendance for the selected date/shift/site
   const { data: existingAttendance } = useQuery({
     queryKey: ['existing-attendance', selectedSiteId, selectedDate, selectedShift],
-    queryFn: async (): Promise<{ id: string; worker_id: string; status: string }[]> => {
+    queryFn: async (): Promise<{ id: string; worker_id: string; status: string; overtime: number | null; deduction: number | null; leave_type: string | null }[]> => {
       if (!selectedSiteId) return [];
       const { data, error } = await supabase
         .from('attendance')
-        .select('id, worker_id, status')
+        .select('id, worker_id, status, overtime, deduction, leave_type')
         .eq('site_id', selectedSiteId)
         .eq('attendance_date', selectedDate)
         .eq('shift', selectedShift);
       if (error) throw error;
-      return (data as { id: string; worker_id: string; status: string }[]) ?? [];
+      return (data as { id: string; worker_id: string; status: string; overtime: number | null; deduction: number | null; leave_type: string | null }[]) ?? [];
     },
     enabled: !!selectedSiteId,
   });
 
   useEffect(() => {
-    const map: Record<string, AttendanceStatus> = {};
+    const map: Record<string, WorkerMark> = {};
     const records = existingAttendance ?? [];
-    records.forEach((a: { id: string; worker_id: string; status: string }) => {
-      map[a.worker_id] = a.status as AttendanceStatus;
+    records.forEach((a) => {
+      map[a.worker_id] = {
+        status: (a.status as AttendanceStatus) ?? 'Present',
+        overtime: a.overtime ?? 0,
+        deduction: a.deduction ?? 0,
+        leave_type: a.leave_type === 'Paid' ? 'Paid' : 'Unpaid',
+      };
     });
-    setStatuses(map);
+    setMarks(map);
   }, [existingAttendance]);
 
   const todaySummary = useMemo(() => {
-    const values = Object.values(statuses);
+    const values = Object.values(marks);
     return {
-      present: values.filter((s) => s === 'Present').length,
-      absent: values.filter((s) => s === 'Absent').length,
-      halfDay: values.filter((s) => s === 'Half Day').length,
-      leave: values.filter((s) => s === 'Leave').length,
+      present: values.filter((s) => s.status === 'Present').length,
+      absent: values.filter((s) => s.status === 'Absent').length,
+      halfDay: values.filter((s) => s.status === 'Half Day').length,
+      leave: values.filter((s) => s.status === 'Leave').length,
+      totalOT: values.reduce((sum, m) => sum + (m.overtime || 0), 0),
       total: values.length,
     };
-  }, [statuses]);
+  }, [marks]);
 
   const handleSetStatus = (workerId: string, status: AttendanceStatus) => {
-    setStatuses((prev) => ({ ...prev, [workerId]: status }));
+    setMarks((prev) => ({
+      ...prev,
+      [workerId]: {
+        ...(prev[workerId] ?? EMPTY_MARK),
+        status,
+        leave_type: prev[workerId]?.leave_type ?? 'Unpaid',
+      },
+    }));
   };
 
   const handleMarkAllPresent = () => {
     if (!workers) return;
-    const map: Record<string, AttendanceStatus> = {};
+    const map: Record<string, WorkerMark> = {};
     workers.forEach((w: Worker) => {
-      map[w.id] = 'Present';
+      map[w.id] = {
+        status: 'Present',
+        overtime: 0,
+        deduction: 0,
+        leave_type: 'Unpaid',
+      };
     });
-    setStatuses(map);
+    setMarks(map);
   };
 
   const handleSave = async () => {
@@ -143,15 +170,21 @@ export default function AttendancePage() {
     setSaving(true);
     try {
       const records = workers
-        .filter((w: Worker) => statuses[w.id])
-        .map((w: Worker) => ({
-          worker_id: w.id,
-          site_id: selectedSiteId,
-          attendance_date: selectedDate,
-          shift: selectedShift,
-          status: statuses[w.id],
-          supervisor_id: user?.id ?? null,
-        }));
+        .filter((w: Worker) => marks[w.id])
+        .map((w: Worker) => {
+          const mark = marks[w.id] ?? EMPTY_MARK;
+          return {
+            worker_id: w.id,
+            site_id: selectedSiteId,
+            attendance_date: selectedDate,
+            shift: selectedShift,
+            status: mark.status,
+            overtime: mark.overtime && mark.overtime > 0 ? mark.overtime : null,
+            deduction: mark.deduction && mark.deduction > 0 ? mark.deduction : null,
+            leave_type: mark.status === 'Leave' ? mark.leave_type : null,
+            supervisor_id: user?.id ?? null,
+          };
+        });
 
       if (records.length === 0) {
         toast({
@@ -163,7 +196,7 @@ export default function AttendancePage() {
         return;
       }
 
-      // Upsert: on conflict (worker_id, attendance_date, shift), update status
+      // Upsert: on conflict (worker_id, attendance_date, shift), update the whole row
       const { error } = await supabase
         .from('attendance')
         .upsert(records, {
@@ -250,7 +283,7 @@ export default function AttendancePage() {
 
       {/* Today's Summary */}
       {selectedSiteId && workers && workers.length > 0 && (
-        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-lg border border-border/60 bg-card p-3 text-center">
             <p className="text-xs text-muted-foreground">Total</p>
             <p className="text-xl font-bold">{todaySummary.total}</p>
@@ -270,6 +303,10 @@ export default function AttendancePage() {
           <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-center">
             <p className="text-xs text-muted-foreground">Leave</p>
             <p className="text-xl font-bold text-primary">{todaySummary.leave}</p>
+          </div>
+          <div className="rounded-lg border border-accent/20 bg-accent/5 p-3 text-center">
+            <p className="text-xs text-muted-foreground">OT (hrs)</p>
+            <p className="text-xl font-bold text-accent">{todaySummary.totalOT}</p>
           </div>
         </div>
       )}
@@ -296,11 +333,12 @@ export default function AttendancePage() {
       ) : (
         <div className="space-y-3">
           {workers.map((worker: Worker) => {
-            const currentStatus = statuses[worker.id];
+            const currentMark = marks[worker.id] ?? EMPTY_MARK;
+            const currentStatus = currentMark.status;
             return (
               <Card key={worker.id} className="border-border/60">
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
                     {/* Worker Info */}
                     <div className="flex items-center gap-3">
                       <Avatar className="h-12 w-12">
@@ -317,30 +355,99 @@ export default function AttendancePage() {
                       </div>
                     </div>
 
-                    {/* Status Buttons */}
-                    <div className="flex gap-1.5 sm:gap-2">
-                      {(Object.keys(STATUS_CONFIG) as AttendanceStatus[]).map((status) => {
-                        const config = STATUS_CONFIG[status];
-                        const Icon = config.icon;
-                        const isActive = currentStatus === status;
-                        return (
-                          <button
-                            key={status}
-                            type="button"
-                            onClick={() => handleSetStatus(worker.id, status)}
-                            className={cn(
-                              'flex h-11 w-11 items-center justify-center rounded-lg border-2 transition-all sm:h-12 sm:w-12',
-                              isActive
-                                ? config.activeColor
-                                : `border-border bg-card ${config.color} hover:bg-secondary`
-                            )}
-                            aria-label={status}
-                            title={status}
+                    <div className="flex flex-col items-end gap-2">
+                      {/* Status Buttons */}
+                      <div className="flex gap-1.5 sm:gap-2">
+                        {(Object.keys(STATUS_CONFIG) as AttendanceStatus[]).map((status) => {
+                          const config = STATUS_CONFIG[status];
+                          const Icon = config.icon;
+                          const isActive = currentStatus === status;
+                          return (
+                            <button
+                              key={status}
+                              type="button"
+                              onClick={() => handleSetStatus(worker.id, status)}
+                              className={cn(
+                                'flex h-11 w-11 items-center justify-center rounded-lg border-2 transition-all sm:h-12 sm:w-12',
+                                isActive
+                                  ? config.activeColor
+                                  : `border-border bg-card ${config.color} hover:bg-secondary`
+                              )}
+                              aria-label={status}
+                              title={status}
+                            >
+                              <Icon className="h-5 w-5" />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Extras: leave type, OT, deduction */}
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {currentStatus === 'Leave' && (
+                          <Select
+                            value={currentMark.leave_type}
+                            onValueChange={(v) =>
+                              setMarks((prev) => ({
+                                ...prev,
+                                [worker.id]: { ...(prev[worker.id] ?? EMPTY_MARK), leave_type: v as 'Paid' | 'Unpaid' },
+                              }))
+                            }
                           >
-                            <Icon className="h-5 w-5" />
-                          </button>
-                        );
-                      })}
+                            <SelectTrigger className="h-8 w-28 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Paid">Paid</SelectItem>
+                              <SelectItem value="Unpaid">Unpaid</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                        {currentStatus !== 'Absent' && (
+                          <>
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                className="h-8 w-16 px-2 text-xs"
+                                value={currentMark.overtime || ''}
+                                placeholder="OT"
+                                onChange={(e) =>
+                                  setMarks((prev) => ({
+                                    ...prev,
+                                    [worker.id]: {
+                                      ...(prev[worker.id] ?? EMPTY_MARK),
+                                      overtime: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
+                                    },
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Minus className="h-3.5 w-3.5 text-muted-foreground" />
+                              <Input
+                                type="number"
+                                min={0}
+                                step={5}
+                                className="h-8 w-20 px-2 text-xs"
+                                value={currentMark.deduction || ''}
+                                placeholder="Ded. ₹"
+                                onChange={(e) =>
+                                  setMarks((prev) => ({
+                                    ...prev,
+                                    [worker.id]: {
+                                      ...(prev[worker.id] ?? EMPTY_MARK),
+                                      deduction: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
+                                    },
+                                  }))
+                                }
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </CardContent>

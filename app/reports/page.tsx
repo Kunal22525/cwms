@@ -10,13 +10,14 @@ import {
   MapPin,
   Download,
   Loader2,
+  FileSpreadsheet,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState } from '@/components/layout/empty-state';
 import { StatusBadge } from '@/components/layout/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -47,7 +48,28 @@ import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDate, downloadBlob } from '@/lib/utils';
 import type { Site, Worker } from '@/types';
 
-type ReportType = 'monthly-attendance' | 'worker-advance' | 'site-attendance' | 'worker-summary';
+type ReportType = 'salary-sheet' | 'monthly-attendance' | 'worker-advance' | 'site-attendance';
+
+type SalaryRow = {
+  worker_id: string;
+  worker_code: string;
+  name: string;
+  trade: string | null;
+  daily_wage: number | null;
+  is_temporary: boolean;
+  site: string;
+  present: number;
+  half: number;
+  paid: number;
+  unpaid: number;
+  absent: number;
+  ot: number;
+  ded: number;
+  gross: number;
+  otAmt: number;
+  adv: number;
+  net: number;
+};
 
 export default function ReportsPage() {
   const { user } = useAuth();
@@ -94,7 +116,7 @@ export default function ReportsPage() {
       let query = supabase
         .from('attendance')
         .select(`
-          id, status, attendance_date, shift,
+          id, status, attendance_date, shift, overtime, deduction, leave_type,
           worker:workers(id, worker_code, name, trade),
           site:sites(id, site_name)
         `)
@@ -108,7 +130,7 @@ export default function ReportsPage() {
 
       const { data, error } = await query;
       if (error) throw error;
-      return (data as unknown as { id: string; status: string; attendance_date: string; shift: string; worker: { id: string; worker_code: string; name: string; trade: string } | null; site: { id: string; site_name: string } | null }[]) ?? [];
+      return (data as unknown as { id: string; status: string; attendance_date: string; shift: string; overtime: number | null; deduction: number | null; leave_type: string | null; worker: { id: string; worker_code: string; name: string; trade: string } | null; site: { id: string; site_name: string } | null }[]) ?? [];
     },
   });
 
@@ -157,24 +179,26 @@ export default function ReportsPage() {
         .select('id, site_name, site_code')
         .order('site_name');
 
-      const results: { site: string; site_code: string; present: number; absent: number; halfDay: number; leave: number; total: number }[] = [];
+      const results: { site: string; site_code: string; present: number; absent: number; halfDay: number; paid: number; unpaid: number; ot: number; total: number }[] = [];
 
       for (const site of (sitesData as { id: string; site_name: string; site_code: string }[]) ?? []) {
         const { data } = await supabase
           .from('attendance')
-          .select('status')
+          .select('status, overtime, leave_type')
           .eq('site_id', site.id)
           .gte('attendance_date', startDate)
           .lte('attendance_date', endDate);
 
-        const records = (data as { status: string }[]) ?? [];
+        const records = (data as { status: string; overtime: number | null; leave_type: string | null }[]) ?? [];
         results.push({
           site: site.site_name,
           site_code: site.site_code,
           present: records.filter((r) => r.status === 'Present').length,
           absent: records.filter((r) => r.status === 'Absent').length,
           halfDay: records.filter((r) => r.status === 'Half Day').length,
-          leave: records.filter((r) => r.status === 'Leave').length,
+          paid: records.filter((r) => r.status === 'Leave' && r.leave_type === 'Paid').length,
+          unpaid: records.filter((r) => r.status === 'Leave' && r.leave_type !== 'Paid').length,
+          ot: records.reduce((s, r) => s + (r.overtime ?? 0), 0),
           total: records.length,
         });
       }
@@ -243,15 +267,115 @@ export default function ReportsPage() {
     },
   });
 
+  // Salary Sheet data (mirrors the export)
+  const { data: salaryData, isLoading: salaryLoading } = useQuery({
+    queryKey: ['report-salary', month, siteId],
+    queryFn: async () => {
+      const [year, mon] = month.split('-');
+      const startDate = `${year}-${mon}-01`;
+      const endDay = new Date(parseInt(year), parseInt(mon), 0).getDate();
+      const endDate = `${year}-${mon}-${String(endDay).padStart(2, '0')}`;
+
+      let wq = supabase
+        .from('workers')
+        .select(`
+          id, worker_code, name, trade, daily_wage, is_temporary, site_id,
+          site:sites(id, site_name)
+        `);
+      if (siteId !== 'all') wq = wq.eq('site_id', siteId);
+      const { data: allWorkers } = await wq;
+      if (!allWorkers?.length) return { rows: [] as SalaryRow[], days: endDay };
+
+      let aq = supabase
+        .from('attendance')
+        .select('worker_id, status, overtime, deduction, leave_type')
+        .gte('attendance_date', startDate)
+        .lte('attendance_date', endDate);
+      if (siteId !== 'all') aq = aq.eq('site_id', siteId);
+      const { data: allAttData } = await aq;
+
+      let advQ = supabase
+        .from('salary_advances')
+        .select('worker_id, amount')
+        .eq('status', 'Approved')
+        .gte('request_date', startDate)
+        .lte('request_date', endDate);
+      const { data: advData } = await advQ;
+
+      const attMap = new Map<string, { status: string; overtime: number | null; deduction: number | null; leave_type: string | null }[]>();
+      (allAttData ?? []).forEach((r: { worker_id: string; status: string; overtime: number | null; deduction: number | null; leave_type: string | null }) => {
+        if (!attMap.has(r.worker_id)) attMap.set(r.worker_id, []);
+        attMap.get(r.worker_id)!.push(r);
+      });
+
+      const rows: SalaryRow[] = (allWorkers as unknown as { id: string; worker_code: string; name: string; trade: string | null; daily_wage: number | null; is_temporary: boolean; site: { site_name: string } | null }[]).map((w) => {
+        const att = attMap.get(w.id) ?? [];
+        let present = 0, half = 0, paid = 0, unpaid = 0, absent = 0, ot = 0, ded = 0;
+        att.forEach((r) => {
+          if (r.status === 'Present') present++;
+          else if (r.status === 'Half Day') half++;
+          else if (r.status === 'Absent') absent++;
+          else if (r.status === 'Leave') { if (r.leave_type === 'Paid') paid++; else unpaid++; }
+          ot += r.overtime ?? 0;
+          ded += r.deduction ?? 0;
+        });
+        const daily = Number(w.daily_wage ?? 0);
+        const gross = daily * (present + half * 0.5 + paid);
+        const otAmt = daily > 0 ? (daily / 8) * ot : 0;
+        const adv = advData?.filter((a) => a.worker_id === w.id).reduce((s, a) => s + Number(a.amount), 0) ?? 0;
+        const net = gross + otAmt - ded - adv;
+        return {
+          worker_id: w.id,
+          worker_code: w.worker_code,
+          name: w.name,
+          trade: w.trade ?? null,
+          daily_wage: w.daily_wage,
+          is_temporary: w.is_temporary ?? false,
+          site: w.site?.site_name ?? '—',
+          present, half, paid, unpaid, absent, ot, ded,
+          gross: Math.round(gross),
+          otAmt: Math.round(otAmt),
+          adv: Math.round(adv),
+          net: Math.round(net),
+        };
+      });
+
+      const regular = rows.filter((r) => !r.is_temporary);
+      const temp = rows.filter((r) => r.is_temporary);
+      return { rows: [...regular, ...temp], days: endDay };
+    },
+  });
+
+  const salaryTotals = useMemo(() => {
+    const rows = salaryData?.rows ?? [];
+    const base = rows.filter((r) => !r.is_temporary);
+    return {
+      payroll: base.reduce((s, r) => s + r.net, 0),
+      gross: base.reduce((s, r) => s + r.gross, 0),
+      otAmt: base.reduce((s, r) => s + r.otAmt, 0),
+      otHrs: base.reduce((s, r) => s + r.ot, 0),
+      ded: base.reduce((s, r) => s + r.ded, 0),
+      adv: base.reduce((s, r) => s + r.adv, 0),
+      present: base.reduce((s, r) => s + r.present, 0),
+      absent: base.reduce((s, r) => s + r.absent, 0),
+      half: base.reduce((s, r) => s + r.half, 0),
+      paid: base.reduce((s, r) => s + r.paid, 0),
+      unpaid: base.reduce((s, r) => s + r.unpaid, 0),
+      count: base.length,
+    };
+  }, [salaryData]);
+
   const monthlyStats = useMemo(() => {
-    if (!monthlyData) return { present: 0, absent: 0, halfDay: 0, leave: 0, total: 0, percentage: 0 };
+    if (!monthlyData) return { present: 0, absent: 0, halfDay: 0, paidLeave: 0, unpaidLeave: 0, ot: 0, total: 0, percentage: 0 };
     const present = monthlyData.filter((r) => r.status === 'Present').length;
     const absent = monthlyData.filter((r) => r.status === 'Absent').length;
     const halfDay = monthlyData.filter((r) => r.status === 'Half Day').length;
-    const leave = monthlyData.filter((r) => r.status === 'Leave').length;
+    const paidLeave = monthlyData.filter((r) => r.status === 'Leave' && r.leave_type === 'Paid').length;
+    const unpaidLeave = monthlyData.filter((r) => r.status === 'Leave' && r.leave_type !== 'Paid').length;
+    const ot = monthlyData.reduce((s, r) => s + (r.overtime ?? 0), 0);
     const total = monthlyData.length;
-    const percentage = total > 0 ? Math.round(((present + halfDay * 0.5) / total) * 100) : 0;
-    return { present, absent, halfDay, leave, total, percentage };
+    const percentage = total > 0 ? Math.round(((present + halfDay * 0.5 + paidLeave) / total) * 100) : 0;
+    return { present, absent, halfDay, paidLeave, unpaidLeave, ot, total, percentage };
   }, [monthlyData]);
 
   const advanceStats = useMemo(() => {
@@ -280,89 +404,40 @@ export default function ReportsPage() {
 
   const exportToExcel = async (type: ReportType) => {
     setExporting(type);
+    let fileName = '';
     try {
-      const wb = XLSX.utils.book_new();
-      const genDate = new Date().toLocaleString();
-
+      const payload: Record<string, string> = { type };
+      if (type === 'salary-sheet' || type === 'monthly-attendance' || type === 'site-attendance') {
+        payload.month = month;
+        payload.siteId = siteId;
+      }
       if (type === 'monthly-attendance') {
-        const rows = (monthlyData ?? []).map((r) => ({
-          Date: formatDate(r.attendance_date),
-          Worker: r.worker?.name ?? '',
-          Code: r.worker?.worker_code ?? '',
-          Trade: r.worker?.trade ?? '',
-          Site: r.site?.site_name ?? '',
-          Shift: r.shift,
-          Status: r.status,
-        }));
-        const ws = XLSX.utils.json_to_sheet(rows, { origin: 'A3' } as never);
-        XLSX.utils.sheet_add_aoa(ws, [['Monthly Attendance Report'], [`Generated: ${genDate}`]], { origin: 'A1' });
-        XLSX.utils.book_append_sheet(wb, ws, 'Monthly Attendance');
-        const fileName = `monthly-attendance-${month}.xlsx`;
-        const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
-        await logReport('Monthly Attendance', fileName);
-      } else if (type === 'worker-advance') {
-        const rows = (advanceData ?? []).map((r) => ({
-          Date: formatDate(r.request_date),
-          Worker: r.worker?.name ?? '',
-          Code: r.worker?.worker_code ?? '',
-          Amount: Number(r.amount),
-          Status: r.status,
-          Reason: r.reason ?? '',
-          ApprovedBy: r.approved_by_profile?.full_name ?? '',
-        }));
-        const ws = XLSX.utils.json_to_sheet(rows, { origin: 'A3' } as never);
-        XLSX.utils.sheet_add_aoa(ws, [['Worker Advance Report'], [`Generated: ${genDate}`]], { origin: 'A1' });
-        XLSX.utils.book_append_sheet(wb, ws, 'Worker Advances');
-        const fileName = `worker-advance-report-${new Date().toISOString().split('T')[0]}.xlsx`;
-        const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
-        await logReport('Worker Advance', fileName);
-      } else if (type === 'site-attendance') {
-        const rows = (siteAttendanceData ?? []).map((r) => ({
-          Site: r.site,
-          Code: r.site_code,
-          Present: r.present,
-          Absent: r.absent,
-          'Half Day': r.halfDay,
-          Leave: r.leave,
-          Total: r.total,
-        }));
-        const ws = XLSX.utils.json_to_sheet(rows, { origin: 'A3' } as never);
-        XLSX.utils.sheet_add_aoa(ws, [['Site-wise Attendance Report'], [`Generated: ${genDate}`]], { origin: 'A1' });
-        XLSX.utils.book_append_sheet(wb, ws, 'Site Attendance');
-        const fileName = `site-attendance-${month}.xlsx`;
-        const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
-        await logReport('Site Attendance', fileName);
-      } else if (type === 'worker-summary') {
-        const rows = (workerSummaryData ?? []).map((r) => ({
-          Code: r.worker_code,
-          Name: r.name,
-          Trade: r.trade,
-          Site: r.site,
-          'Daily Wage': r.daily_wage ?? 0,
-          'Joining Date': r.joining_date ? formatDate(r.joining_date) : '',
-          Status: r.status,
-          'Working Place': r.working_place ?? '',
-          'Work Type': r.work_type ?? '',
-          'Working Since': r.working_since ? formatDate(r.working_since) : '',
-          Present: r.present,
-          Absent: r.absent,
-          'Half Day': r.halfDay,
-          Leave: r.leave,
-          'Advance Balance': r.advanceBalance,
-          'Advance Count': r.advanceCount,
-        }));
-        const ws = XLSX.utils.json_to_sheet(rows, { origin: 'A3' } as never);
-        XLSX.utils.sheet_add_aoa(ws, [['Worker Summary Report'], [`Generated: ${genDate}`]], { origin: 'A1' });
-        XLSX.utils.book_append_sheet(wb, ws, 'Worker Summary');
-        const fileName = `worker-summary-${new Date().toISOString().split('T')[0]}.xlsx`;
-        const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
-        await logReport('Worker Summary', fileName);
+        payload.workerId = workerId;
+        payload.shift = shift;
+      }
+      if (type === 'worker-advance') {
+        payload.dateFrom = dateFrom;
+        payload.dateTo = dateTo;
+        payload.siteId = siteId;
+        payload.workerId = workerId;
+        payload.advanceStatus = advanceStatus;
       }
 
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error ?? 'Export failed');
+      }
+
+      const blob = await res.blob();
+      fileName = getFileName(type);
+      downloadBlob(blob, fileName);
+      await logReport(getReportLabel(type), fileName);
       toast({ title: 'Export complete', description: 'Excel file has been downloaded.' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Export failed';
@@ -376,8 +451,13 @@ export default function ReportsPage() {
     <div>
       <PageHeader title="Reports" description="Generate and export workforce reports" />
 
-      <Tabs defaultValue="monthly-attendance">
+      <Tabs defaultValue="salary-sheet">
         <TabsList className="mb-4 flex flex-wrap">
+          <TabsTrigger value="salary-sheet" className="gap-1.5">
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Salary Sheet</span>
+            <span className="sm:hidden">Salary</span>
+          </TabsTrigger>
           <TabsTrigger value="monthly-attendance" className="gap-1.5">
             <Calendar className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Monthly Attendance</span>
@@ -399,6 +479,128 @@ export default function ReportsPage() {
             <span className="sm:hidden">Summary</span>
           </TabsTrigger>
         </TabsList>
+
+        {/* Salary Sheet */}
+        <TabsContent value="salary-sheet">
+          <Card className="border-border/60">
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="text-base">Monthly Salary Sheet</CardTitle>
+                <Button size="sm" onClick={() => exportToExcel('salary-sheet')} disabled={exporting === 'salary-sheet' || !salaryData?.rows.length}>
+                  {exporting === 'salary-sheet' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Export Excel
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="space-y-2">
+                  <Label>Month</Label>
+                  <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Site</Label>
+                  <Select value={siteId} onValueChange={setSiteId}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Sites</SelectItem>
+                      {sites?.map((s) => <SelectItem key={s.id} value={s.id}>{s.site_name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                <StatBox label="Workers" value={salaryTotals.count} color="text-foreground" />
+                <StatBox label="Gross Salary" value={formatCurrency(salaryTotals.gross)} color="text-foreground" />
+                <StatBox label="OT Amount" value={formatCurrency(salaryTotals.otAmt)} color="text-accent" />
+                <StatBox label="Deductions" value={formatCurrency(-salaryTotals.ded)} color="text-destructive" />
+                <StatBox label="Advances (month)" value={formatCurrency(-salaryTotals.adv)} color="text-warning" />
+                <StatBox label="Net Payable" value={formatCurrency(salaryTotals.payroll)} color="text-success" />
+                <StatBox label="OT (hrs)" value={salaryTotals.otHrs} color="text-accent" />
+              </div>
+
+              {salaryLoading ? (
+                <Skeleton className="h-64 w-full" />
+              ) : !salaryData?.rows.length ? (
+                <EmptyState icon={FileSpreadsheet} title="No data" description="No workers found for the selected month and site." />
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Code</TableHead>
+                        <TableHead>Worker</TableHead>
+                        <TableHead className="hidden md:table-cell">Role</TableHead>
+                        <TableHead className="hidden lg:table-cell">Site</TableHead>
+                        <TableHead className="text-center">Days</TableHead>
+                        <TableHead className="text-center">P</TableHead>
+                        <TableHead className="text-center">H</TableHead>
+                        <TableHead className="text-center">PL</TableHead>
+                        <TableHead className="text-center">UL</TableHead>
+                        <TableHead className="text-center">A</TableHead>
+                        <TableHead className="text-center">OT</TableHead>
+                        <TableHead className="text-right">Gross (₹)</TableHead>
+                        <TableHead className="text-right">OT (₹)</TableHead>
+                        <TableHead className="text-right">Ded (₹)</TableHead>
+                        <TableHead className="text-right">Adv (₹)</TableHead>
+                        <TableHead className="text-right">Net (₹)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {salaryData.rows.map((r) => (
+                        <TableRow key={r.worker_id}>
+                          <TableCell className="font-mono text-xs">{r.worker_code}</TableCell>
+                          <TableCell className="font-medium">
+                            {r.name}
+                            {r.is_temporary && (
+                              <Badge variant="secondary" className="ml-2 text-[10px]">Temp</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-muted-foreground">{r.trade ?? '—'}</TableCell>
+                          <TableCell className="hidden lg:table-cell text-muted-foreground">{r.site}</TableCell>
+                          <TableCell className="text-center text-muted-foreground">{salaryData.days}</TableCell>
+                          <TableCell className="text-center text-success">{r.present}</TableCell>
+                          <TableCell className="text-center text-warning">{r.half}</TableCell>
+                          <TableCell className="text-center text-primary">{r.paid}</TableCell>
+                          <TableCell className="text-center text-primary">{r.unpaid}</TableCell>
+                          <TableCell className="text-center text-destructive">{r.absent}</TableCell>
+                          <TableCell className="text-center">{r.ot}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(r.gross)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(r.otAmt)}</TableCell>
+                          <TableCell className="text-right text-destructive">{r.ded ? `-${formatCurrency(r.ded)}` : '—'}</TableCell>
+                          <TableCell className="text-right text-warning">{r.adv ? `-${formatCurrency(r.adv)}` : '—'}</TableCell>
+                          <TableCell className="text-right font-semibold text-success">{formatCurrency(r.net)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {salaryData.rows.length > 0 && (
+                        <TableRow className="border-t-2 border-border bg-muted/30">
+                          <TableCell className="font-semibold" colSpan={4}>TOTAL</TableCell>
+                          <TableCell className="text-center text-muted-foreground" colSpan={1}>—</TableCell>
+                          <TableCell className="text-center font-semibold text-success">{salaryTotals.present}</TableCell>
+                          <TableCell className="text-center font-semibold text-warning">{salaryTotals.half}</TableCell>
+                          <TableCell className="text-center font-semibold text-primary">{salaryTotals.paid}</TableCell>
+                          <TableCell className="text-center font-semibold text-primary">{salaryTotals.unpaid}</TableCell>
+                          <TableCell className="text-center font-semibold text-destructive">{salaryTotals.absent}</TableCell>
+                          <TableCell className="text-center font-semibold">{salaryTotals.otHrs}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.gross)}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.otAmt)}</TableCell>
+                          <TableCell className="text-right font-semibold text-destructive">-{formatCurrency(salaryTotals.ded)}</TableCell>
+                          <TableCell className="text-right font-semibold text-warning">-{formatCurrency(salaryTotals.adv)}</TableCell>
+                          <TableCell className="text-right font-semibold text-success">{formatCurrency(salaryTotals.payroll)}</TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    P = Present, H = Half Day, PL = Paid Leave, UL = Unpaid Leave, A = Absent, OT = Overtime (hrs).
+                    Gross = daily wage × (Present + ½ Half Day + Paid Leave). Net = Gross + OT − Deductions − Monthly Approved Advances.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Monthly Attendance */}
         <TabsContent value="monthly-attendance">
@@ -452,12 +654,15 @@ export default function ReportsPage() {
               </div>
 
               {/* Stats */}
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
                 <StatBox label="Present" value={monthlyStats.present} color="text-success" />
                 <StatBox label="Absent" value={monthlyStats.absent} color="text-destructive" />
                 <StatBox label="Half Day" value={monthlyStats.halfDay} color="text-warning" />
-                <StatBox label="Leave" value={monthlyStats.leave} color="text-primary" />
+                <StatBox label="Paid Leave" value={monthlyStats.paidLeave} color="text-primary" />
+                <StatBox label="Unpaid Leave" value={monthlyStats.unpaidLeave} color="text-primary" />
+                <StatBox label="OT (hrs)" value={monthlyStats.ot} color="text-accent" />
                 <StatBox label="Attendance %" value={`${monthlyStats.percentage}%`} color="text-foreground" />
+                <StatBox label="Total Records" value={monthlyStats.total} color="text-foreground" />
               </div>
 
               {monthlyLoading ? (
@@ -474,6 +679,7 @@ export default function ReportsPage() {
                         <TableHead className="hidden md:table-cell">Site</TableHead>
                         <TableHead>Shift</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead className="text-center">OT (hrs)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -484,6 +690,7 @@ export default function ReportsPage() {
                           <TableCell className="hidden md:table-cell text-muted-foreground">{r.site?.site_name ?? '—'}</TableCell>
                           <TableCell className="text-sm">{r.shift}</TableCell>
                           <TableCell><StatusBadge status={r.status} /></TableCell>
+                          <TableCell className="text-center text-sm">{r.overtime ?? 0}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -617,7 +824,9 @@ export default function ReportsPage() {
                         <TableHead className="text-center">Present</TableHead>
                         <TableHead className="text-center">Absent</TableHead>
                         <TableHead className="text-center">Half Day</TableHead>
-                        <TableHead className="text-center">Leave</TableHead>
+                        <TableHead className="text-center">Paid Leave</TableHead>
+                        <TableHead className="text-center">Unpaid Leave</TableHead>
+                        <TableHead className="text-center">OT (hrs)</TableHead>
                         <TableHead className="text-center">Total</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -628,7 +837,9 @@ export default function ReportsPage() {
                           <TableCell className="text-center text-success">{s.present}</TableCell>
                           <TableCell className="text-center text-destructive">{s.absent}</TableCell>
                           <TableCell className="text-center text-warning">{s.halfDay}</TableCell>
-                          <TableCell className="text-center text-primary">{s.leave}</TableCell>
+                          <TableCell className="text-center text-primary">{s.paid}</TableCell>
+                          <TableCell className="text-center text-primary">{s.unpaid}</TableCell>
+                          <TableCell className="text-center">{s.ot}</TableCell>
                           <TableCell className="text-center font-medium">{s.total}</TableCell>
                         </TableRow>
                       ))}
@@ -655,10 +866,6 @@ export default function ReportsPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button size="sm" onClick={() => exportToExcel('worker-summary')} disabled={exporting === 'worker-summary' || !workerSummaryData?.length}>
-                  {exporting === 'worker-summary' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                  Export Excel
-                </Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -673,7 +880,7 @@ export default function ReportsPage() {
                       <TableRow>
                         <TableHead>Code</TableHead>
                         <TableHead>Name</TableHead>
-                        <TableHead className="hidden md:table-cell">Trade</TableHead>
+                        <TableHead className="hidden md:table-cell">Role</TableHead>
                         <TableHead className="hidden lg:table-cell">Site</TableHead>
                         <TableHead className="text-center">Present</TableHead>
                         <TableHead className="text-center">Absent</TableHead>
@@ -704,6 +911,25 @@ export default function ReportsPage() {
       </Tabs>
     </div>
   );
+}
+
+function getFileName(type: ReportType): string {
+  const d = new Date().toISOString().split('T')[0];
+  switch (type) {
+    case 'salary-sheet': return `salary-sheet-${d}.xlsx`;
+    case 'monthly-attendance': return `monthly-attendance-${d}.xlsx`;
+    case 'worker-advance': return `worker-advance-report-${d}.xlsx`;
+    case 'site-attendance': return `site-attendance-${d}.xlsx`;
+  }
+}
+
+function getReportLabel(type: ReportType): string {
+  switch (type) {
+    case 'salary-sheet': return 'Salary Sheet';
+    case 'monthly-attendance': return 'Monthly Attendance';
+    case 'worker-advance': return 'Worker Advance';
+    case 'site-attendance': return 'Site Attendance';
+  }
 }
 
 function StatBox({ label, value, color }: { label: string; value: string | number; color: string }) {
