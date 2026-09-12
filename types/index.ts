@@ -57,6 +57,7 @@ export interface Worker {
   site_id: string | null;
   photo_url: string | null;
   is_temporary: boolean;
+  pf_percentage: number | null;
   status: WorkerStatus;
   working_place: string | null;
   work_type: string | null;
@@ -125,4 +126,28 @@ export interface CompanySettings {
   address: string | null;
   gst_number: string | null;
   updated_at: string;
+}
+
+export type DocumentExpiryStatus =
+  | 'valid'
+  | 'expiring_soon'
+  | 'expired';
+
+export interface Document {
+  id: string;
+  title: string;
+  description: string | null;
+  file_name: string | null;
+  storage_path: string;
+  file_url: string;
+  file_type: string | null;
+  file_size_bytes: number;
+  from_date: string | null;
+  expiry_date: string;
+  remind_me: boolean;
+  reminder_days: number;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  uploaded_by_profile?: Pick<Profile, 'id' | 'full_name'> | null;
 }

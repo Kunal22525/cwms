@@ -9,6 +9,7 @@ import {
   CalendarCheck,
   Wallet,
   FileBarChart,
+  FileText,
   UserCog,
   Settings,
   HardHat,
@@ -33,6 +34,7 @@ const navItems: NavItem[] = [
   { label: 'Attendance', href: '/attendance', icon: CalendarCheck },
   { label: 'Salary Advances', href: '/salary-advances', icon: Wallet },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
+  { label: 'Documents', href: '/documents', icon: FileText },
   { label: 'Users', href: '/users', icon: UserCog, adminOnly: true },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];

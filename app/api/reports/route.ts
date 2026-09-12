@@ -24,6 +24,7 @@ interface WorkerLite {
   name: string;
   trade: string | null;
   daily_wage: number | null;
+  pf_percentage: number | null;
   is_temporary: boolean;
   status: string;
   site_name: string | null;
@@ -188,7 +189,7 @@ export async function POST(request: NextRequest) {
     let wq = supabase
       .from('workers')
       .select(
-        'id, worker_code, name, trade, daily_wage, is_temporary, status, site:sites(site_name)'
+        'id, worker_code, name, trade, daily_wage, pf_percentage, is_temporary, status, site:sites(site_name)'
       )
       .order('name');
     if (siteId !== 'all') wq = wq.eq('site_id', siteId);
@@ -199,6 +200,7 @@ export async function POST(request: NextRequest) {
       name: w.name,
       trade: w.trade ?? '',
       daily_wage: safe(w.daily_wage),
+      pf_percentage: safe(w.pf_percentage),
       is_temporary: !!w.is_temporary,
       status: w.status,
       site_name: w.site?.site_name ?? '—',
@@ -312,7 +314,7 @@ export async function POST(request: NextRequest) {
 
     const workerMap = new Map(workers.map((w) => [w.id, w]));
     for (const wid of Object.keys(attByWorker)) {
-      if (!workerMap.has(wid)) workerMap.set(wid, { id: wid, worker_code: '', name: '(removed)', trade: '', daily_wage: 0, is_temporary: false, status: '', site_name: '—' });
+      if (!workerMap.has(wid)) workerMap.set(wid, { id: wid, worker_code: '', name: '(removed)', trade: '', daily_wage: 0, pf_percentage: 0, is_temporary: false, status: '', site_name: '—' });
     }
 
     const advByWorker: Record<string, { amount: number; status: string; request_date: string }> = {};
@@ -335,11 +337,12 @@ export async function POST(request: NextRequest) {
     interface SalaryRow {
       worker: WorkerLite;
       present: number; half: number; paidLeave: number; unpaidLeave: number; absent: number;
-      otHours: number; otAmount: number; deduction: number; gross: number;
+      daysPaid: number; calcText: string;
+      otHours: number; otAmount: number; pf: number; deduction: number; gross: number;
       monthlyAdvance: number; advanceBalance: number; net: number;
     }
     const rows: SalaryRow[] = [];
-    let grossT = 0, otT = 0, otAmtT = 0, dedT = 0, advT = 0, advBalT = 0, netT = 0;
+    let grossT = 0, otT = 0, otAmtT = 0, pfT = 0, dedT = 0, advT = 0, advBalT = 0, netT = 0;
     let presentT = 0, halfT = 0, paidT = 0, unpaidT = 0, absentT = 0;
 
     for (const w of regular) {
@@ -357,18 +360,22 @@ export async function POST(request: NextRequest) {
         ded += safe(r.deduction);
       }
       const wage = safe(w.daily_wage);
-      const gross = money(wage * (present + half * 0.5 + paidLeave));
+      const pfPct = safe(w.pf_percentage) || 0;
+      const daysPaid = present + half * 0.5 + paidLeave;
+      const gross = money(wage * daysPaid);
       const otAmount = money((wage / 8) * otH);
+      const pf = money((gross * pfPct) / 100);
       const monthlyAdvance = money(advMonthlyByWorker[w.id] ?? 0);
       const advanceBalance = money(advByWorker[w.id]?.amount ?? 0);
-      const net = money(gross + otAmount - ded - monthlyAdvance);
-      rows.push({ worker: w, present, half, paidLeave, unpaidLeave, absent, otHours: money(otH), otAmount, deduction: ded, gross, monthlyAdvance, advanceBalance, net });
+      const net = money(gross + otAmount - pf - ded - monthlyAdvance);
+      const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days × ₹${wage}/day = ₹${gross}`;
+      rows.push({ worker: w, present, half, paidLeave, unpaidLeave, absent, daysPaid, calcText, otHours: money(otH), otAmount, pf, deduction: ded, gross, monthlyAdvance, advanceBalance, net });
       presentT += present; halfT += half; paidT += paidLeave; unpaidT += unpaidLeave; absentT += absent;
-      otT += otH; otAmtT += otAmount; dedT += ded; grossT += gross; advT += monthlyAdvance; advBalT += advanceBalance; netT += net;
+      otT += otH; otAmtT += otAmount; pfT += pf; dedT += ded; grossT += gross; advT += monthlyAdvance; advBalT += advanceBalance; netT += net;
     }
 
-    const lastCol = 17;
-    const widths = [10, 22, 18, 22, 12, 9, 9, 9, 10, 10, 10, 12, 13, 13, 13, 13, 13];
+    const lastCol = 20;
+    const widths = [10, 22, 18, 22, 12, 9, 9, 9, 9, 8, 10, 22, 9, 11, 12, 10, 12, 13, 13, 13];
     const sheetWidths = widths;
 
     // ---- KPI Sheet ----
@@ -389,6 +396,7 @@ export async function POST(request: NextRequest) {
       ['Overtime (hours)', otT],
       ['Overtime Amount (₹)', money(otAmtT)],
       ['Gross Wages (₹)', money(grossT)],
+      ['PF Deduction (₹)', money(pfT)],
       ['Attendance Deductions (₹)', money(dedT)],
       ['Monthly Approved Advances (₹)', money(advT)],
       ['Total Advance Balance (₹)', money(advBalT)],
@@ -415,7 +423,7 @@ export async function POST(request: NextRequest) {
     ss.views = [{ state: 'frozen', ySplit: 8 }];
     setWidths(ss, sheetWidths);
     addHeader(ss, 'Monthly Salary Sheet', `Month: ${monthLabel(month || '')}  •  Site: ${siteId === 'all' ? 'All Sites' : 'Selected'}  •  Generated: ${genDate}`, lastCol);
-    const headers = ['Code', 'Worker Name', 'Role', 'Site', 'Daily Wage', 'Present', 'Half', 'Paid Lv', 'Unpaid Lv', 'Absent', 'OT (hrs)', 'OT Amt', 'Gross', 'Deduction', 'Monthly Adv', 'Adv Balance', 'Net Payable'];
+    const headers = ['Code', 'Worker Name', 'Role', 'Site', 'Daily Wage (₹)', 'Present', 'Half', 'Paid Lv', 'Unpaid Lv', 'Absent', 'Days Paid', 'Earnings Calc', 'OT (hrs)', 'OT Amt (₹)', 'Gross (₹)', 'PF (₹)', 'Deduction (₹)', 'Monthly Adv (₹)', 'Adv Balance (₹)', 'Net Payable (₹)'];
     for (let c = 1; c <= headers.length; c++) {
       ss.getRow(6).getCell(c).value = headers[c - 1];
     }
@@ -423,18 +431,18 @@ export async function POST(request: NextRequest) {
     let rr = 7;
     for (const row of rows) {
       const w = row.worker;
-      const cells = [
-        w.worker_code, w.name, w.trade, w.site_name, money(w.daily_wage ?? 0),
+      const cells: (string | number)[] = [
+        w.worker_code, w.name, w.trade ?? '', w.site_name ?? '—', money(w.daily_wage ?? 0),
         row.present, row.half, row.paidLeave, row.unpaidLeave, row.absent,
-        row.otHours, money(row.otAmount), money(row.gross), money(row.deduction),
+        row.daysPaid, row.calcText,
+        row.otHours, money(row.otAmount), money(row.gross), money(row.pf), money(row.deduction),
         money(row.monthlyAdvance), money(row.advanceBalance), money(row.net),
       ];
       cells.forEach((v, i) => {
         const cell = ss.getRow(rr).getCell(i + 1);
         cell.value = v;
         styleDataCell(cell);
-        if (i >= 4) cell.numFmt = i === 4 || i >= 10 ? '#,##0.00' : '0';
-        if (i >= 10) cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        if (i === 4 || i >= 13) cell.numFmt = '#,##0.00';
       });
       ss.getRow(rr).height = 20;
       if (rr % 2 === 0) {
@@ -445,18 +453,18 @@ export async function POST(request: NextRequest) {
       rr++;
     }
     // Totals row
-    const totals = ['TOTAL', '', '', '', '', presentT, halfT, paidT, unpaidT, absentT, money(otT), money(otAmtT), money(grossT), money(dedT), money(advT), money(advBalT), money(netT)];
+    const totals: (string | number)[] = ['TOTAL', '', '', '', '', presentT, halfT, paidT, unpaidT, absentT, '', '', money(otT), money(otAmtT), money(grossT), money(pfT), money(dedT), money(advT), money(advBalT), money(netT)];
     totals.forEach((v, i) => {
       const cell = ss.getRow(rr).getCell(i + 1);
       cell.value = v;
       cell.font = { bold: true };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
       cell.border = { top: BORDER_H, bottom: BORDER_H, left: BORDER, right: BORDER };
-      if (i >= 4) cell.numFmt = i === 4 || i >= 10 ? '#,##0.00' : '0';
+      if (i >= 5) cell.numFmt = i >= 12 ? '#,##0.00' : '0';
     });
     ss.getRow(rr).height = 22;
     const noteRow = rr + 2;
-    ss.getCell(1, noteRow).value = 'Notes: Net Payable = (Daily Wage × Working Days) + Overtime Amount − Deductions − Monthly Approved Advances. Working Days = Present + Half Day × 0.5 + Paid Leaves.';
+    ss.getCell(1, noteRow).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Gross = Daily Wage × Working Days (shown in Earnings Calc). Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%). Net Payable = Gross + OT Amount − PF − Deductions − Monthly Approved Advances.';
     ss.getCell(1, noteRow).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
     ss.mergeCells(1, noteRow, lastCol, noteRow);
 

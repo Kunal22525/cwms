@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
+  UserCheck,
   Users,
   Plus,
   Search,
@@ -77,6 +78,7 @@ export default function WorkersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [deleteWorker, setDeleteWorker] = useState<Worker | null>(null);
+  const [convertWorker, setConvertWorker] = useState<Worker | null>(null);
   const [search, setSearch] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
   const [tradeFilter, setTradeFilter] = useState('all');
@@ -94,6 +96,7 @@ export default function WorkersPage() {
     aadhaar: '',
     trade: '',
     daily_wage: null,
+    pf_percentage: 12,
     joining_date: '',
     site_id: '',
     working_place: '',
@@ -173,6 +176,7 @@ export default function WorkersPage() {
       aadhaar: '',
       trade: '',
       daily_wage: null,
+      pf_percentage: 12,
       joining_date: '',
       site_id: sites?.[0]?.id ?? '',
       working_place: '',
@@ -197,6 +201,7 @@ export default function WorkersPage() {
       aadhaar: worker.aadhaar ?? '',
       trade: worker.trade ?? '',
       daily_wage: worker.daily_wage,
+      pf_percentage: worker.pf_percentage ?? 12,
       joining_date: worker.joining_date ?? '',
       site_id: worker.site_id ?? '',
       working_place: worker.working_place ?? '',
@@ -287,6 +292,7 @@ export default function WorkersPage() {
         aadhaar: form.aadhaar || null,
         trade: form.trade,
         daily_wage: form.daily_wage ?? null,
+        pf_percentage: form.pf_percentage,
         joining_date: form.joining_date || null,
         site_id: form.site_id || null,
         working_place: form.working_place || null,
@@ -356,6 +362,27 @@ export default function WorkersPage() {
       toast({ variant: 'destructive', title: 'Delete failed', description: message });
     }
     setDeleteWorker(null);
+  };
+
+  const handleConvertToFullTime = async () => {
+    if (!convertWorker) return;
+    try {
+      const { error } = await supabase
+        .from('workers')
+        .update({ is_temporary: false })
+        .eq('id', convertWorker.id);
+      if (error) throw error;
+      toast({
+        title: 'Worker converted',
+        description: `${convertWorker.name} is now a full-time worker and will be included in the salary sheet.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Conversion failed', description: message });
+    }
+    setConvertWorker(null);
   };
 
   return (
@@ -501,6 +528,16 @@ export default function WorkersPage() {
                       </Button>
                       {canManage && (
                         <>
+                          {worker.is_temporary && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Convert to full-time"
+                              onClick={() => setConvertWorker(worker)}
+                            >
+                              <UserCheck className="h-4 w-4 text-primary" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -676,23 +713,39 @@ export default function WorkersPage() {
                 {errors.daily_wage && <p className="text-xs text-destructive">{errors.daily_wage}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="site_id">Site Assigned</Label>
-                <Select
-                  value={form.site_id || 'none'}
-                  onValueChange={(v) => setForm({ ...form, site_id: v === 'none' ? '' : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No site assigned</SelectItem>
-                    {sites?.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.site_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.site_id && <p className="text-xs text-destructive">{errors.site_id}</p>}
+                <Label htmlFor="pf_percentage">PF %</Label>
+                <Input
+                  id="pf_percentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={form.pf_percentage ?? ''}
+                  onChange={(e) => setForm({ ...form, pf_percentage: e.target.value ? Number(e.target.value) : 0 })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  PF deducted as % of gross in the salary sheet (default 12%, 0 = not covered).
+                </p>
+                {errors.pf_percentage && <p className="text-xs text-destructive">{errors.pf_percentage}</p>}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="site_id">Site Assigned</Label>
+              <Select
+                value={form.site_id || 'none'}
+                onValueChange={(v) => setForm({ ...form, site_id: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a site" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No site assigned</SelectItem>
+                  {sites?.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.site_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.site_id && <p className="text-xs text-destructive">{errors.site_id}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -785,6 +838,26 @@ export default function WorkersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Convert to Full-time Confirmation */}
+      <AlertDialog open={!!convertWorker} onOpenChange={(open) => !open && setConvertWorker(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Convert to full-time worker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &quot;{convertWorker?.name}&quot;
+              {convertWorker?.worker_code ? ` (${convertWorker.worker_code})` : ''} will be moved
+              from the Temporary Workers section to the monthly salary sheet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConvertToFullTime}>
+              Convert to Full-time
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Worker Confirmation */}
       <AlertDialog open={!!deleteWorker} onOpenChange={(open) => !open && setDeleteWorker(null)}>

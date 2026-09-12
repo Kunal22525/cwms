@@ -9,6 +9,7 @@ const PROTECTED_PREFIXES = [
   '/attendance',
   '/salary-advances',
   '/reports',
+  '/documents',
   '/users',
   '/settings',
 ];

@@ -56,6 +56,7 @@ type SalaryRow = {
   name: string;
   trade: string | null;
   daily_wage: number | null;
+  pf_percentage: number | null;
   is_temporary: boolean;
   site: string;
   present: number;
@@ -63,13 +64,18 @@ type SalaryRow = {
   paid: number;
   unpaid: number;
   absent: number;
+  daysPaid: number;
+  calcText: string;
   ot: number;
+  pf: number;
   ded: number;
   gross: number;
   otAmt: number;
   adv: number;
   net: number;
 };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function ReportsPage() {
   const { user } = useAuth();
@@ -279,12 +285,12 @@ export default function ReportsPage() {
       let wq = supabase
         .from('workers')
         .select(`
-          id, worker_code, name, trade, daily_wage, is_temporary, site_id,
+          id, worker_code, name, trade, daily_wage, pf_percentage, is_temporary, site_id,
           site:sites(id, site_name)
         `);
       if (siteId !== 'all') wq = wq.eq('site_id', siteId);
       const { data: allWorkers } = await wq;
-      if (!allWorkers?.length) return { rows: [] as SalaryRow[], days: endDay };
+      if (!allWorkers?.length) return { rows: [] as SalaryRow[] };
 
       let aq = supabase
         .from('attendance')
@@ -308,7 +314,7 @@ export default function ReportsPage() {
         attMap.get(r.worker_id)!.push(r);
       });
 
-      const rows: SalaryRow[] = (allWorkers as unknown as { id: string; worker_code: string; name: string; trade: string | null; daily_wage: number | null; is_temporary: boolean; site: { site_name: string } | null }[]).map((w) => {
+      const rows: SalaryRow[] = (allWorkers as unknown as { id: string; worker_code: string; name: string; trade: string | null; daily_wage: number | null; pf_percentage: number | null; is_temporary: boolean; site: { site_name: string } | null }[]).map((w) => {
         const att = attMap.get(w.id) ?? [];
         let present = 0, half = 0, paid = 0, unpaid = 0, absent = 0, ot = 0, ded = 0;
         att.forEach((r) => {
@@ -320,29 +326,31 @@ export default function ReportsPage() {
           ded += r.deduction ?? 0;
         });
         const daily = Number(w.daily_wage ?? 0);
-        const gross = daily * (present + half * 0.5 + paid);
-        const otAmt = daily > 0 ? (daily / 8) * ot : 0;
-        const adv = advData?.filter((a) => a.worker_id === w.id).reduce((s, a) => s + Number(a.amount), 0) ?? 0;
-        const net = gross + otAmt - ded - adv;
+        const pfPct = Number(w.pf_percentage ?? 12);
+        const daysPaid = present + half * 0.5 + paid;
+        const gross = round2(daily * daysPaid);
+        const otAmt = round2(daily > 0 ? (daily / 8) * ot : 0);
+        const pf = round2((gross * pfPct) / 100);
+        const adv = round2(advData?.filter((a) => a.worker_id === w.id).reduce((s, a) => s + Number(a.amount), 0) ?? 0);
+        const net = round2(gross + otAmt - pf - ded - adv);
+        const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days × ₹${daily}/day = ₹${gross}`;
         return {
           worker_id: w.id,
           worker_code: w.worker_code,
           name: w.name,
           trade: w.trade ?? null,
           daily_wage: w.daily_wage,
+          pf_percentage: w.pf_percentage,
           is_temporary: w.is_temporary ?? false,
           site: w.site?.site_name ?? '—',
-          present, half, paid, unpaid, absent, ot, ded,
-          gross: Math.round(gross),
-          otAmt: Math.round(otAmt),
-          adv: Math.round(adv),
-          net: Math.round(net),
+          present, half, paid, unpaid, absent, daysPaid, calcText, ot, pf, ded,
+          gross, otAmt, adv, net,
         };
       });
 
       const regular = rows.filter((r) => !r.is_temporary);
       const temp = rows.filter((r) => r.is_temporary);
-      return { rows: [...regular, ...temp], days: endDay };
+      return { rows: [...regular, ...temp] };
     },
   });
 
@@ -354,6 +362,7 @@ export default function ReportsPage() {
       gross: base.reduce((s, r) => s + r.gross, 0),
       otAmt: base.reduce((s, r) => s + r.otAmt, 0),
       otHrs: base.reduce((s, r) => s + r.ot, 0),
+      pf: base.reduce((s, r) => s + r.pf, 0),
       ded: base.reduce((s, r) => s + r.ded, 0),
       adv: base.reduce((s, r) => s + r.adv, 0),
       present: base.reduce((s, r) => s + r.present, 0),
@@ -510,10 +519,11 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
                 <StatBox label="Workers" value={salaryTotals.count} color="text-foreground" />
                 <StatBox label="Gross Salary" value={formatCurrency(salaryTotals.gross)} color="text-foreground" />
                 <StatBox label="OT Amount" value={formatCurrency(salaryTotals.otAmt)} color="text-accent" />
+                <StatBox label="PF (12%)" value={formatCurrency(salaryTotals.pf)} color="text-destructive" />
                 <StatBox label="Deductions" value={formatCurrency(-salaryTotals.ded)} color="text-destructive" />
                 <StatBox label="Advances (month)" value={formatCurrency(-salaryTotals.adv)} color="text-warning" />
                 <StatBox label="Net Payable" value={formatCurrency(salaryTotals.payroll)} color="text-success" />
@@ -533,6 +543,7 @@ export default function ReportsPage() {
                         <TableHead>Worker</TableHead>
                         <TableHead className="hidden md:table-cell">Role</TableHead>
                         <TableHead className="hidden lg:table-cell">Site</TableHead>
+                        <TableHead className="hidden xl:table-cell text-center">Wage</TableHead>
                         <TableHead className="text-center">Days</TableHead>
                         <TableHead className="text-center">P</TableHead>
                         <TableHead className="text-center">H</TableHead>
@@ -540,8 +551,10 @@ export default function ReportsPage() {
                         <TableHead className="text-center">UL</TableHead>
                         <TableHead className="text-center">A</TableHead>
                         <TableHead className="text-center">OT</TableHead>
+                        <TableHead className="hidden lg:table-cell">Earnings Calc</TableHead>
                         <TableHead className="text-right">Gross (₹)</TableHead>
                         <TableHead className="text-right">OT (₹)</TableHead>
+                        <TableHead className="text-right">PF (₹)</TableHead>
                         <TableHead className="text-right">Ded (₹)</TableHead>
                         <TableHead className="text-right">Adv (₹)</TableHead>
                         <TableHead className="text-right">Net (₹)</TableHead>
@@ -559,15 +572,18 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell className="hidden md:table-cell text-muted-foreground">{r.trade ?? '—'}</TableCell>
                           <TableCell className="hidden lg:table-cell text-muted-foreground">{r.site}</TableCell>
-                          <TableCell className="text-center text-muted-foreground">{salaryData.days}</TableCell>
+                          <TableCell className="hidden xl:table-cell text-right text-muted-foreground">{formatCurrency(r.daily_wage)}</TableCell>
+                          <TableCell className="text-center text-muted-foreground">{r.daysPaid}</TableCell>
                           <TableCell className="text-center text-success">{r.present}</TableCell>
                           <TableCell className="text-center text-warning">{r.half}</TableCell>
                           <TableCell className="text-center text-primary">{r.paid}</TableCell>
                           <TableCell className="text-center text-primary">{r.unpaid}</TableCell>
                           <TableCell className="text-center text-destructive">{r.absent}</TableCell>
                           <TableCell className="text-center">{r.ot}</TableCell>
+                          <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{r.calcText}</TableCell>
                           <TableCell className="text-right">{formatCurrency(r.gross)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(r.otAmt)}</TableCell>
+                          <TableCell className="text-right text-destructive">{r.pf ? `-${formatCurrency(r.pf)}` : '—'}</TableCell>
                           <TableCell className="text-right text-destructive">{r.ded ? `-${formatCurrency(r.ded)}` : '—'}</TableCell>
                           <TableCell className="text-right text-warning">{r.adv ? `-${formatCurrency(r.adv)}` : '—'}</TableCell>
                           <TableCell className="text-right font-semibold text-success">{formatCurrency(r.net)}</TableCell>
@@ -575,16 +591,12 @@ export default function ReportsPage() {
                       ))}
                       {salaryData.rows.length > 0 && (
                         <TableRow className="border-t-2 border-border bg-muted/30">
-                          <TableCell className="font-semibold" colSpan={4}>TOTAL</TableCell>
-                          <TableCell className="text-center text-muted-foreground" colSpan={1}>—</TableCell>
-                          <TableCell className="text-center font-semibold text-success">{salaryTotals.present}</TableCell>
-                          <TableCell className="text-center font-semibold text-warning">{salaryTotals.half}</TableCell>
-                          <TableCell className="text-center font-semibold text-primary">{salaryTotals.paid}</TableCell>
-                          <TableCell className="text-center font-semibold text-primary">{salaryTotals.unpaid}</TableCell>
-                          <TableCell className="text-center font-semibold text-destructive">{salaryTotals.absent}</TableCell>
-                          <TableCell className="text-center font-semibold">{salaryTotals.otHrs}</TableCell>
+                          <TableCell className="font-semibold" colSpan={5}>TOTAL</TableCell>
+                          <TableCell className="text-center text-muted-foreground" colSpan={7}>—</TableCell>
+                          <TableCell className="hidden lg:table-cell text-right text-muted-foreground">—</TableCell>
                           <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.gross)}</TableCell>
                           <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.otAmt)}</TableCell>
+                          <TableCell className="text-right font-semibold text-destructive">-{formatCurrency(salaryTotals.pf)}</TableCell>
                           <TableCell className="text-right font-semibold text-destructive">-{formatCurrency(salaryTotals.ded)}</TableCell>
                           <TableCell className="text-right font-semibold text-warning">-{formatCurrency(salaryTotals.adv)}</TableCell>
                           <TableCell className="text-right font-semibold text-success">{formatCurrency(salaryTotals.payroll)}</TableCell>
@@ -594,7 +606,9 @@ export default function ReportsPage() {
                   </Table>
                   <p className="mt-3 text-xs text-muted-foreground">
                     P = Present, H = Half Day, PL = Paid Leave, UL = Unpaid Leave, A = Absent, OT = Overtime (hrs).
-                    Gross = daily wage × (Present + ½ Half Day + Paid Leave). Net = Gross + OT − Deductions − Monthly Approved Advances.
+                    Working Days = Present + ½ Half Day + Paid Leave. Gross = Daily Wage × Working Days (see Earnings Calc).
+                    Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%).
+                    Net = Gross + OT − PF − Deductions − Monthly Approved Advances.
                   </p>
                 </div>
               )}

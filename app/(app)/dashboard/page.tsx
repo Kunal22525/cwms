@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import {
@@ -13,6 +14,9 @@ import {
   CalendarPlus,
   MapPinPlus,
   FilePlus,
+  FileText,
+  FileWarning,
+  FileX2,
   CalendarDays,
   Check,
   Minus,
@@ -207,6 +211,40 @@ export default function DashboardPage() {
     enabled: !!user,
   });
 
+  const { data: documentAlerts } = useQuery({
+    queryKey: ['document-expiry-alerts'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('documents')
+        .select('id, title, file_name, expiry_date, remind_me, reminder_days');
+      return (data as {
+        id: string;
+        title: string;
+        file_name: string | null;
+        expiry_date: string;
+        remind_me: boolean;
+        reminder_days: number;
+      }[]) ?? [];
+    },
+    enabled: !!user,
+  });
+
+  const docAlerts = useMemo(() => {
+    if (!documentAlerts?.length) return { expired: [] as { id: string; title: string; days: number }[], expiring: [] as { id: string; title: string; days: number }[] };
+    const todayMs = new Date().setHours(0, 0, 0, 0);
+    const expired: { id: string; title: string; days: number }[] = [];
+    const expiring: { id: string; title: string; days: number }[] = [];
+    documentAlerts.forEach((doc) => {
+      const exp = new Date(doc.expiry_date);
+      exp.setHours(0, 0, 0, 0);
+      const days = Math.round((exp.getTime() - todayMs) / 86400000);
+      if (days < 0) expired.push({ id: doc.id, title: doc.title, days: Math.abs(days) });
+      else if (doc.remind_me && days <= doc.reminder_days)
+        expiring.push({ id: doc.id, title: doc.title, days });
+    });
+    return { expired, expiring };
+  }, [documentAlerts]);
+
   if (isLoading) {
     return (
       <div>
@@ -274,6 +312,50 @@ export default function DashboardPage() {
             Request Advance
           </Link>
         </Button>
+      </div>
+
+      {/* Document Expiry Reminders */}
+      {(docAlerts.expired.length > 0 || docAlerts.expiring.length > 0) && (
+        <div className="mt-6 space-y-3">
+          {docAlerts.expired.length > 0 && (
+            <Link
+              href="/documents"
+              className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 hover:bg-destructive/10"
+            >
+              <FileX2 className="h-5 w-5 shrink-0 text-destructive" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-destructive">
+                  {docAlerts.expired.length} expired document{docAlerts.expired.length === 1 ? '' : 's'}
+                </p>
+                <p className="text-xs text-destructive/80">
+                  {docAlerts.expired.map((d) => d.title).join(' · ')}
+                </p>
+              </div>
+            </Link>
+          )}
+          {docAlerts.expiring.length > 0 && (
+            <Link
+              href="/documents"
+              className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4 hover:bg-warning/10"
+            >
+              <FileWarning className="h-5 w-5 shrink-0 text-warning" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-warning">
+                  {docAlerts.expiring.length} document{docAlerts.expiring.length === 1 ? '' : 's'} expiring soon
+                </p>
+                <p className="text-xs text-warning/80">
+                  {docAlerts.expiring.map((d) => `${d.title} (${d.days}d)`).join(' · ')}
+                </p>
+              </div>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Quick action hint */}
+      <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+        <FileText className="h-4 w-4" />
+        Track expiry of licenses and documents in the Documents section.
       </div>
 
       {/* Attendance Status: Today + Current Month */}

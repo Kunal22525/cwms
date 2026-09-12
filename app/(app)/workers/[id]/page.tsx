@@ -1,6 +1,7 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -16,9 +17,11 @@ import {
   Calendar,
   Loader2,
   Pencil,
+  UserCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useToast } from '@/hooks/use-toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatusBadge } from '@/components/layout/status-badge';
 import { EmptyState } from '@/components/layout/empty-state';
@@ -42,7 +45,33 @@ export default function WorkerDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { role } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const workerId = params.id as string;
+
+  const [converting, setConverting] = useState(false);
+
+  const handleConvertToFullTime = async () => {
+    if (!worker) return;
+    setConverting(true);
+    try {
+      const { error } = await supabase
+        .from('workers')
+        .update({ is_temporary: false })
+        .eq('id', worker.id);
+      if (error) throw error;
+      toast({
+        title: 'Worker converted',
+        description: `${worker.name} is now a full-time worker and will be included in the salary sheet.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['worker', workerId] });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Conversion failed', description: message });
+    }
+    setConverting(false);
+  };
 
   const { data: worker, isLoading } = useQuery({
     queryKey: ['worker', workerId],
@@ -146,6 +175,12 @@ export default function WorkerDetailPage() {
       </div>
 
       <PageHeader title={worker.name} description={`${worker.worker_code} · ${worker.trade ?? '—'}`}>
+        {role === 'admin' && worker.is_temporary && (
+          <Button onClick={handleConvertToFullTime} disabled={converting}>
+            {converting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCheck className="mr-2 h-4 w-4" />}
+            Convert to Full-time
+          </Button>
+        )}
         {role === 'admin' && (
           <Button asChild variant="outline">
             <Link href="/workers">Edit Worker</Link>
@@ -225,6 +260,7 @@ export default function WorkerDetailPage() {
           <CardContent className="space-y-3">
             <InfoRow icon={HardHat} label="Role" value={worker.trade} />
             <InfoRow icon={Wallet} label="Daily Wage" value={worker.daily_wage ? formatCurrency(worker.daily_wage) : null} />
+            <InfoRow icon={Wallet} label="PF (%)" value={worker.pf_percentage != null ? `${worker.pf_percentage}%` : null} />
             <InfoRow icon={Calendar} label="Joining Date" value={formatDate(worker.joining_date)} />
             <InfoRow icon={MapPin} label="Current Site" value={worker.site?.site_name} />
             <InfoRow icon={MapPin} label="Working Place" value={worker.working_place} />

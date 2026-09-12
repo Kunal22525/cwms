@@ -38,6 +38,12 @@ export const workerSchema = z.object({
     .min(0, 'Daily wage must be 0 or greater')
     .optional()
     .nullable(),
+  pf_percentage: z.coerce
+    .number()
+    .min(0, 'PF must be 0 or greater')
+    .max(100, 'PF cannot exceed 100%')
+    .optional()
+    .nullable(),
   joining_date: z.string().optional().nullable(),
   site_id: z.string().uuid('Site is required'),
   working_place: z.string().optional(),
