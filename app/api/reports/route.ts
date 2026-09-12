@@ -464,9 +464,9 @@ export async function POST(request: NextRequest) {
     });
     ss.getRow(rr).height = 22;
     const noteRow = rr + 2;
-    ss.getCell(1, noteRow).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Gross = Daily Wage × Working Days (shown in Earnings Calc). Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%). Net Payable = Gross + OT Amount − PF − Deductions − Monthly Approved Advances.';
-    ss.getCell(1, noteRow).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
-    ss.mergeCells(1, noteRow, lastCol, noteRow);
+    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Gross = Daily Wage × Working Days (shown in Earnings Calc). Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%). Net Payable = Gross + OT Amount − PF − Deductions − Monthly Approved Advances.';
+    ss.getCell(noteRow, 1).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
+    ss.mergeCells(noteRow, 1, noteRow, lastCol);
 
     // ---- Attendance Register ----
     const reg = wb.addWorksheet('Attendance Register');
