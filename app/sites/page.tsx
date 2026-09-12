@@ -405,7 +405,7 @@ export default function SitesPage() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingSite ? 'Edit Site' : 'Add Site'}</DialogTitle>
             <DialogDescription>
