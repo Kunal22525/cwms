@@ -313,10 +313,8 @@ export default function WorkersPage() {
         status: form.status,
         is_temporary: form.is_temporary ?? false,
         ...(form.bank_name ? { bank_name: form.bank_name } : {}),
-        ...(form.account_number
-          ? { account_number: form.account_number.replace(/\s/g, '') }
-          : {}),
-        ...(form.ifsc ? { ifsc: form.ifsc.trim().toUpperCase() } : {}),
+        account_number: form.account_number.replace(/\s/g, ''),
+        ifsc: form.ifsc.trim().toUpperCase(),
         ...(form.branch ? { branch: form.branch } : {}),
       };
 
@@ -833,7 +831,7 @@ export default function WorkersPage() {
                   {errors.branch && <p className="text-xs text-destructive">{errors.branch}</p>}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="account_number">Account Number (optional)</Label>
+                  <Label htmlFor="account_number">Account Number</Label>
                   <Input
                     id="account_number"
                     inputMode="numeric"
@@ -844,7 +842,7 @@ export default function WorkersPage() {
                   {errors.account_number && <p className="text-xs text-destructive">{errors.account_number}</p>}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="ifsc">IFSC Code (optional)</Label>
+                  <Label htmlFor="ifsc">IFSC Code</Label>
                   <Input
                     id="ifsc"
                     value={form.ifsc ?? ''}

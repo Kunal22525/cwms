@@ -71,8 +71,12 @@ type SalaryRow = {
   ded: number;
   gross: number;
   otAmt: number;
-  adv: number;
-  net: number;
+  monthly: number;
+  totalSalary: number;
+  netDue: number;
+  paidOnSite: number;
+  paidOffice: number;
+  totalDue: number;
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -300,13 +304,18 @@ export default function ReportsPage() {
       if (siteId !== 'all') aq = aq.eq('site_id', siteId);
       const { data: allAttData } = await aq;
 
-      let advQ = supabase
-        .from('salary_advances')
-        .select('worker_id, amount')
-        .eq('status', 'Approved')
-        .gte('request_date', startDate)
-        .lte('request_date', endDate);
-      const { data: advData } = await advQ;
+      let payQ = supabase
+        .from('salary_payments')
+        .select('worker_id, amount, payment_location')
+        .eq('salary_month', month);
+      const { data: payData } = await payQ;
+      const payMap = new Map<string, { onSite: number; office: number }>();
+      (payData ?? []).forEach((p: { worker_id: string; amount: number; payment_location: string }) => {
+        const cur = payMap.get(p.worker_id) ?? { onSite: 0, office: 0 };
+        if (p.payment_location === 'In Office') cur.office += Number(p.amount);
+        else cur.onSite += Number(p.amount);
+        payMap.set(p.worker_id, cur);
+      });
 
       const attMap = new Map<string, { status: string; overtime: number | null; deduction: number | null; leave_type: string | null }[]>();
       (allAttData ?? []).forEach((r: { worker_id: string; status: string; overtime: number | null; deduction: number | null; leave_type: string | null }) => {
@@ -331,8 +340,13 @@ export default function ReportsPage() {
         const gross = round2(daily * daysPaid);
         const otAmt = round2(daily > 0 ? (daily / 8) * ot : 0);
         const pf = round2((gross * pfPct) / 100);
-        const adv = round2(advData?.filter((a) => a.worker_id === w.id).reduce((s, a) => s + Number(a.amount), 0) ?? 0);
-        const net = round2(gross + otAmt - pf - ded - adv);
+        const pay = payMap.get(w.id) ?? { onSite: 0, office: 0 };
+        const paidOnSite = round2(pay.onSite);
+        const paidOffice = round2(pay.office);
+        const monthly = round2(daily * 30);
+        const totalSalary = round2(Math.min(gross, monthly) + otAmt);
+        const netDue = round2(totalSalary - pf - ded);
+        const totalDue = round2(netDue - paidOnSite - paidOffice);
         const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days × ₹${daily}/day = ₹${gross}`;
         return {
           worker_id: w.id,
@@ -344,7 +358,7 @@ export default function ReportsPage() {
           is_temporary: w.is_temporary ?? false,
           site: w.site?.site_name ?? '—',
           present, half, paid, unpaid, absent, daysPaid, calcText, ot, pf, ded,
-          gross, otAmt, adv, net,
+          gross, otAmt, monthly, totalSalary, netDue, paidOnSite, paidOffice, totalDue,
         };
       });
 
@@ -358,18 +372,16 @@ export default function ReportsPage() {
     const rows = salaryData?.rows ?? [];
     const base = rows.filter((r) => !r.is_temporary);
     return {
-      payroll: base.reduce((s, r) => s + r.net, 0),
-      gross: base.reduce((s, r) => s + r.gross, 0),
+      monthly: base.reduce((s, r) => s + r.monthly, 0),
+      totalSalary: base.reduce((s, r) => s + r.totalSalary, 0),
+      netDue: base.reduce((s, r) => s + r.netDue, 0),
+      totalDue: base.reduce((s, r) => s + r.totalDue, 0),
+      paidOnSite: base.reduce((s, r) => s + r.paidOnSite, 0),
+      paidOffice: base.reduce((s, r) => s + r.paidOffice, 0),
       otAmt: base.reduce((s, r) => s + r.otAmt, 0),
       otHrs: base.reduce((s, r) => s + r.ot, 0),
       pf: base.reduce((s, r) => s + r.pf, 0),
       ded: base.reduce((s, r) => s + r.ded, 0),
-      adv: base.reduce((s, r) => s + r.adv, 0),
-      present: base.reduce((s, r) => s + r.present, 0),
-      absent: base.reduce((s, r) => s + r.absent, 0),
-      half: base.reduce((s, r) => s + r.half, 0),
-      paid: base.reduce((s, r) => s + r.paid, 0),
-      unpaid: base.reduce((s, r) => s + r.unpaid, 0),
       count: base.length,
     };
   }, [salaryData]);
@@ -521,13 +533,13 @@ export default function ReportsPage() {
 
               <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
                 <StatBox label="Workers" value={salaryTotals.count} color="text-foreground" />
-                <StatBox label="Gross Salary" value={formatCurrency(salaryTotals.gross)} color="text-foreground" />
+                <StatBox label="Monthly Salary" value={formatCurrency(salaryTotals.monthly)} color="text-foreground" />
+                <StatBox label="Total Salary" value={formatCurrency(salaryTotals.totalSalary)} color="text-foreground" />
                 <StatBox label="OT Amount" value={formatCurrency(salaryTotals.otAmt)} color="text-accent" />
-                <StatBox label="PF (12%)" value={formatCurrency(salaryTotals.pf)} color="text-destructive" />
-                <StatBox label="Deductions" value={formatCurrency(-salaryTotals.ded)} color="text-destructive" />
-                <StatBox label="Advances (month)" value={formatCurrency(-salaryTotals.adv)} color="text-warning" />
-                <StatBox label="Net Payable" value={formatCurrency(salaryTotals.payroll)} color="text-success" />
-                <StatBox label="OT (hrs)" value={salaryTotals.otHrs} color="text-accent" />
+                <StatBox label="PF" value={formatCurrency(salaryTotals.pf)} color="text-destructive" />
+                <StatBox label="Net Salary Due" value={formatCurrency(salaryTotals.netDue)} color="text-foreground" />
+                <StatBox label="Paid On Site" value={formatCurrency(salaryTotals.paidOnSite)} color="text-warning" />
+                <StatBox label="Total Due" value={formatCurrency(salaryTotals.totalDue)} color="text-success" />
               </div>
 
               {salaryLoading ? (
@@ -552,12 +564,13 @@ export default function ReportsPage() {
                         <TableHead className="text-center">A</TableHead>
                         <TableHead className="text-center">OT</TableHead>
                         <TableHead className="hidden lg:table-cell">Earnings Calc</TableHead>
-                        <TableHead className="text-right">Gross (₹)</TableHead>
-                        <TableHead className="text-right">OT (₹)</TableHead>
+                        <TableHead className="hidden xl:table-cell text-right">Monthly (₹)</TableHead>
+                        <TableHead className="text-right">Total Salary (₹)</TableHead>
                         <TableHead className="text-right">PF (₹)</TableHead>
-                        <TableHead className="text-right">Ded (₹)</TableHead>
-                        <TableHead className="text-right">Adv (₹)</TableHead>
-                        <TableHead className="text-right">Net (₹)</TableHead>
+                        <TableHead className="text-right">Net Due (₹)</TableHead>
+                        <TableHead className="text-right">Paid Site (₹)</TableHead>
+                        <TableHead className="hidden xl:table-cell text-right">Paid Office (₹)</TableHead>
+                        <TableHead className="text-right">Total Due (₹)</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -581,34 +594,38 @@ export default function ReportsPage() {
                           <TableCell className="text-center text-destructive">{r.absent}</TableCell>
                           <TableCell className="text-center">{r.ot}</TableCell>
                           <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{r.calcText}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(r.gross)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(r.otAmt)}</TableCell>
+                          <TableCell className="hidden xl:table-cell text-right">{formatCurrency(r.monthly)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(r.totalSalary)}</TableCell>
                           <TableCell className="text-right text-destructive">{r.pf ? `-${formatCurrency(r.pf)}` : '—'}</TableCell>
-                          <TableCell className="text-right text-destructive">{r.ded ? `-${formatCurrency(r.ded)}` : '—'}</TableCell>
-                          <TableCell className="text-right text-warning">{r.adv ? `-${formatCurrency(r.adv)}` : '—'}</TableCell>
-                          <TableCell className="text-right font-semibold text-success">{formatCurrency(r.net)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(r.netDue)}</TableCell>
+                          <TableCell className="text-right text-warning">{r.paidOnSite ? formatCurrency(r.paidOnSite) : '—'}</TableCell>
+                          <TableCell className="hidden xl:table-cell text-right">{r.paidOffice ? `-${formatCurrency(r.paidOffice)}` : '—'}</TableCell>
+                          <TableCell className="text-right font-semibold text-success">{formatCurrency(r.totalDue)}</TableCell>
                         </TableRow>
                       ))}
                       {salaryData.rows.length > 0 && (
                         <TableRow className="border-t-2 border-border bg-muted/30">
                           <TableCell className="font-semibold" colSpan={5}>TOTAL</TableCell>
-                          <TableCell className="text-center text-muted-foreground" colSpan={7}>—</TableCell>
-                          <TableCell className="hidden lg:table-cell text-right text-muted-foreground">—</TableCell>
-                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.gross)}</TableCell>
-                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.otAmt)}</TableCell>
+                          <TableCell className="text-center text-muted-foreground" colSpan={8}>—</TableCell>
+                          <TableCell className="hidden xl:table-cell text-right font-semibold">{formatCurrency(salaryTotals.monthly)}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.totalSalary)}</TableCell>
                           <TableCell className="text-right font-semibold text-destructive">-{formatCurrency(salaryTotals.pf)}</TableCell>
-                          <TableCell className="text-right font-semibold text-destructive">-{formatCurrency(salaryTotals.ded)}</TableCell>
-                          <TableCell className="text-right font-semibold text-warning">-{formatCurrency(salaryTotals.adv)}</TableCell>
-                          <TableCell className="text-right font-semibold text-success">{formatCurrency(salaryTotals.payroll)}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(salaryTotals.netDue)}</TableCell>
+                          <TableCell className="text-right font-semibold text-warning">{formatCurrency(salaryTotals.paidOnSite)}</TableCell>
+                          <TableCell className="hidden xl:table-cell text-right font-semibold">{formatCurrency(salaryTotals.paidOffice)}</TableCell>
+                          <TableCell className="text-right font-semibold text-success">{formatCurrency(salaryTotals.totalDue)}</TableCell>
                         </TableRow>
                       )}
                     </TableBody>
                   </Table>
                   <p className="mt-3 text-xs text-muted-foreground">
                     P = Present, H = Half Day, PL = Paid Leave, UL = Unpaid Leave, A = Absent, OT = Overtime (hrs).
-                    Working Days = Present + ½ Half Day + Paid Leave. Gross = Daily Wage × Working Days (see Earnings Calc).
-                    Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%).
-                    Net = Gross + OT − PF − Deductions − Monthly Approved Advances.
+                    Working Days = Present + ½ Half Day + Paid Leave. Monthly Salary (cap) = Daily Wage × 30.
+                    Total Salary = (Daily Wage × Working Days), capped at Monthly Salary, + Overtime. Overtime can push
+                    Total Salary above the Monthly Salary cap. PF = Gross × PF% (default 12%).
+                    Net Salary Due = Total Salary − PF − Deductions.
+                    Paid On Site / Paid In Office = Salary Release entries recorded for this month on the portal.
+                    Total Due = Net Salary Due − Paid.
                   </p>
                 </div>
               )}

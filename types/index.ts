@@ -108,6 +108,24 @@ export interface SalaryAdvance {
   approved_by_profile?: Pick<Profile, 'id' | 'full_name'> | null;
 }
 
+export type PaymentLocation = 'On Site' | 'In Office';
+
+export interface SalaryPayment {
+  id: string;
+  worker_id: string;
+  site_id: string | null;
+  amount: number;
+  payment_date: string;
+  salary_month: string;
+  payment_location: PaymentLocation;
+  remarks: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  worker?: Pick<Worker, 'id' | 'worker_code' | 'name' | 'trade' | 'site_id' | 'daily_wage'>;
+  site?: Pick<Site, 'id' | 'site_name'> | null;
+}
+
 export interface ReportLog {
   id: string;
   report_type: string | null;

@@ -47,16 +47,16 @@ export const workerSchema = z.object({
   bank_name: z.string().optional(),
   account_number: z
     .string()
-    .optional()
+    .min(1, 'Account number is required')
     .refine(
-      (v) => !v || /^[0-9]{9,18}$/.test(v.replace(/\s/g, '')),
+      (v) => /^[0-9]{9,18}$/.test(v.replace(/\s/g, '')),
       'Enter a valid account number (9-18 digits)'
     ),
   ifsc: z
     .string()
-    .optional()
+    .min(1, 'IFSC code is required')
     .refine(
-      (v) => !v || /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(v),
+      (v) => /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(v),
       'Enter a valid IFSC code (e.g. SBIN0001234)'
     ),
   branch: z.string().optional(),
@@ -80,6 +80,18 @@ export const salaryAdvanceSchema = z.object({
 });
 
 export type SalaryAdvanceFormValues = z.infer<typeof salaryAdvanceSchema>;
+
+export const salaryPaymentSchema = z.object({
+  worker_id: z.string().uuid('Worker is required'),
+  amount: z.coerce.number().positive('Amount must be greater than 0'),
+  payment_date: z.string().min(1, 'Date is required'),
+  payment_location: z.enum(['On Site', 'In Office'], {
+    required_error: 'Select where the salary was paid',
+  }),
+  remarks: z.string().optional(),
+});
+
+export type SalaryPaymentFormValues = z.infer<typeof salaryPaymentSchema>;
 
 export const profileSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),

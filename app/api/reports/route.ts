@@ -340,17 +340,29 @@ export async function POST(request: NextRequest) {
     }
 
     const advByWorker: Record<string, { amount: number; status: string; request_date: string }> = {};
-    const advMonthlyByWorker: Record<string, number> = {};
     for (const a of advances) {
       const widReal = a.worker?.id ?? null;
       if (!widReal || !workerMap.has(widReal)) continue;
       if (a.status === 'Approved') {
         const amt = safe(a.amount);
         advByWorker[widReal] = { amount: (advByWorker[widReal]?.amount ?? 0) + amt, status: 'Approved', request_date: a.request_date };
-        if (a.request_date >= startDate && a.request_date <= endDate) {
-          advMonthlyByWorker[widReal] = (advMonthlyByWorker[widReal] ?? 0) + amt;
-        }
       }
+    }
+
+    // Salary payments (On Site / In Office) recorded via the portal
+    const payByWorker: Record<string, { onSite: number; office: number }> = {};
+    try {
+      const { data: payAll } = await supabase
+        .from('salary_payments')
+        .select('worker_id, amount, payment_location, payment_date, salary_month');
+      for (const p of (payAll ?? []) as { worker_id: string; amount: number; payment_location: string; payment_date: string; salary_month: string }[]) {
+        if (p.salary_month !== month) continue;
+        const cur = (payByWorker[p.worker_id] ??= { onSite: 0, office: 0 });
+        if (p.payment_location === 'In Office') cur.office += safe(p.amount);
+        else cur.onSite += safe(p.amount);
+      }
+    } catch {
+      // salary_payments table may not exist yet
     }
 
     const regular = [...workerMap.values()].filter((w) => !w.is_temporary && w.worker_code);
@@ -362,12 +374,11 @@ export async function POST(request: NextRequest) {
       daysPaid: number; calcText: string;
       otHours: number; otAmount: number; pf: number; deduction: number; gross: number;
       monthlySalary: number; totalSalary: number; netDue: number;
-      monthlyAdvance: number; paidOffice: number; totalDue: number;
-      advanceBalance: number; net: number;
+      paidOnSite: number; paidOffice: number; totalDue: number;
+      advanceBalance: number;
     }
     const rows: SalaryRow[] = [];
-    const dim = daysInMonth(month || `${new Date().getFullYear()}-1`);
-    let grossT = 0, otT = 0, otAmtT = 0, pfT = 0, dedT = 0, advT = 0, advBalT = 0, netT = 0;
+    let grossT = 0, otT = 0, otAmtT = 0, pfT = 0, dedT = 0, paidOnSiteT = 0, advBalT = 0;
     let monthlySalaryT = 0, totalSalaryT = 0, netDueT = 0, paidOfficeT = 0, totalDueT = 0;
     let presentT = 0, halfT = 0, paidT = 0, unpaidT = 0, absentT = 0;
 
@@ -391,18 +402,18 @@ export async function POST(request: NextRequest) {
       const gross = money(wage * daysPaid);
       const otAmount = money((wage / 8) * otH);
       const pf = money((gross * pfPct) / 100);
-      const monthlySalary = money(wage * dim);
-      const totalSalary = money(gross + otAmount);
+      const monthlySalary = money(wage * 30);
+      const totalSalary = money(Math.min(gross, monthlySalary) + otAmount);
       const netDue = money(totalSalary - pf - ded);
-      const monthlyAdvance = money(advMonthlyByWorker[w.id] ?? 0);
-      const paidOffice = 0;
-      const totalDue = money(netDue - monthlyAdvance);
+      const pay = payByWorker[w.id] ?? { onSite: 0, office: 0 };
+      const paidOnSite = money(pay.onSite);
+      const paidOffice = money(pay.office);
+      const totalDue = money(netDue - paidOnSite - paidOffice);
       const advanceBalance = money(advByWorker[w.id]?.amount ?? 0);
-      const net = money(gross + otAmount - pf - ded - monthlyAdvance);
       const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days × ₹${wage}/day = ₹${gross}`;
-      rows.push({ worker: w, present, half, paidLeave, unpaidLeave, absent, daysPaid, calcText, otHours: money(otH), otAmount, pf, deduction: ded, gross, monthlySalary, totalSalary, netDue, monthlyAdvance, paidOffice, totalDue, advanceBalance, net });
+      rows.push({ worker: w, present, half, paidLeave, unpaidLeave, absent, daysPaid, calcText, otHours: money(otH), otAmount, pf, deduction: ded, gross, monthlySalary, totalSalary, netDue, paidOnSite, paidOffice, totalDue, advanceBalance });
       presentT += present; halfT += half; paidT += paidLeave; unpaidT += unpaidLeave; absentT += absent;
-      otT += otH; otAmtT += otAmount; pfT += pf; dedT += ded; grossT += gross; advT += monthlyAdvance; advBalT += advanceBalance; netT += net;
+      otT += otH; otAmtT += otAmount; pfT += pf; dedT += ded; grossT += gross; paidOnSiteT += paidOnSite; advBalT += advanceBalance;
       monthlySalaryT += monthlySalary; totalSalaryT += totalSalary; netDueT += netDue; paidOfficeT += paidOffice; totalDueT += totalDue;
     }
 
@@ -428,7 +439,7 @@ export async function POST(request: NextRequest) {
       ['PF Deduction (₹)', money(pfT)],
       ['Attendance Deductions (₹)', money(dedT)],
       ['Net Salary Due (₹)', money(netDueT)],
-      ['Salary Paid - On Site (₹)', money(advT)],
+      ['Salary Paid - On Site (₹)', money(paidOnSiteT)],
       ['Salary Paid - In Office (₹)', money(paidOfficeT)],
       ['Total Due (₹)', money(totalDueT)],
       ['Total Advance Balance (₹)', money(advBalT)],
@@ -481,7 +492,7 @@ export async function POST(request: NextRequest) {
       const cells: (string | number)[] = [
         sno, w.name, w.worker_code, w.trade ?? '', w.status ?? 'Active',
         row.daysPaid, row.otHours, money(row.monthlySalary), money(row.totalSalary), money(row.pf),
-        money(row.deduction), money(row.netDue), money(row.monthlyAdvance), money(row.paidOffice),
+        money(row.deduction), money(row.netDue), money(row.paidOnSite), money(row.paidOffice),
         money(row.totalDue),
         w.bank_name ?? '', w.account_number ?? '', w.branch ?? '', w.ifsc ?? '',
       ];
@@ -501,7 +512,7 @@ export async function POST(request: NextRequest) {
       rr++;
     }
     // Totals row
-    const totals: (string | number)[] = ['TOTAL', '', '', '', '', round2(daysPaidT), money(otT), money(monthlySalaryT), money(totalSalaryT), money(pfT), money(dedT), money(netDueT), money(advT), money(paidOfficeT), money(totalDueT), '', '', '', ''];
+    const totals: (string | number)[] = ['TOTAL', '', '', '', '', round2(daysPaidT), money(otT), money(monthlySalaryT), money(totalSalaryT), money(pfT), money(dedT), money(netDueT), money(paidOnSiteT), money(paidOfficeT), money(totalDueT), '', '', '', ''];
     totals.forEach((v, i) => {
       const cell = ss.getRow(rr).getCell(i + 1);
       cell.value = v;
@@ -513,7 +524,7 @@ export async function POST(request: NextRequest) {
     });
     ss.getRow(rr).height = 22;
     const noteRow = rr + 2;
-    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Monthly Salary = Daily Wage × Days in Month. Total Salary = (Daily Wage × Working Days) + Overtime Amount. PF = (Daily Wage × Working Days) × PF% (default 12%). Net Salary Due = Total Salary − PF − Deductions. Salary Paid (Paid on Site) = Monthly Approved Advances. Total Due = Net Salary Due − Salary Paid.';
+    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Monthly Salary (cap) = Daily Wage × 30. Total Salary = (Daily Wage × Working Days), capped at Monthly Salary, + Overtime Amount. Overtime can push Total Salary above the Monthly Salary cap. PF = (Daily Wage × Working Days) × PF% (default 12%). Net Salary Due = Total Salary − PF − Deductions. Salary Paid = Salary Release entries recorded on the portal (On Site / In Office, whichever applies). Total Due = Net Salary Due − Salary Paid.';
     ss.getCell(noteRow, 1).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
     ss.mergeCells(noteRow, 1, noteRow, ssCols);
 
