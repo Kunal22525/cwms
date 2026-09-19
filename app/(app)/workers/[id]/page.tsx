@@ -18,6 +18,7 @@ import {
   Loader2,
   Pencil,
   UserCheck,
+  Landmark,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -266,6 +267,22 @@ export default function WorkerDetailPage() {
             <InfoRow icon={MapPin} label="Working Place" value={worker.working_place} />
             <InfoRow icon={Briefcase} label="Type of Work" value={worker.work_type} />
             <InfoRow icon={Calendar} label="Working Since" value={formatDate(worker.working_since)} />
+          </CardContent>
+        </Card>
+
+        {/* Bank Information */}
+        <Card className="border-border/60">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Landmark className="h-4 w-4 text-primary" />
+              Bank Information
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <InfoRow icon={Landmark} label="Bank Name" value={worker.bank_name} />
+            <InfoRow icon={Wallet} label="Account Number" value={worker.account_number} />
+            <InfoRow icon={Wallet} label="IFSC Code" value={worker.ifsc} />
+            <InfoRow icon={MapPin} label="Branch" value={worker.branch} />
           </CardContent>
         </Card>
       </div>

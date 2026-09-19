@@ -7,6 +7,7 @@ import { HardHat, Mail, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useCompanySettings } from '@/lib/company-settings';
+import { COMPANY_NAME, COMPANY_LOGO_URL } from '@/lib/company';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,19 +104,15 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-            {company?.logo_url ? (
-              <Avatar className="h-16 w-16 rounded-2xl">
-                <AvatarImage src={company.logo_url} alt="Company logo" className="object-contain" />
-                <AvatarFallback>
-                  <HardHat className="h-8 w-8 text-primary" />
-                </AvatarFallback>
-              </Avatar>
-            ) : (
-              <HardHat className="h-8 w-8 text-primary" />
-            )}
+            <Avatar className="h-16 w-16 rounded-2xl">
+              <AvatarImage src={company?.logo_url ?? COMPANY_LOGO_URL} alt="Company logo" className="object-contain" />
+              <AvatarFallback>
+                <HardHat className="h-8 w-8 text-primary" />
+              </AvatarFallback>
+            </Avatar>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            {company?.company_name ?? 'Construction Workforce'}
+            {COMPANY_NAME}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {company?.tagline ?? 'Management System'}

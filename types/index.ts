@@ -58,6 +58,10 @@ export interface Worker {
   photo_url: string | null;
   is_temporary: boolean;
   pf_percentage: number | null;
+  bank_name: string | null;
+  account_number: string | null;
+  ifsc: string | null;
+  branch: string | null;
   status: WorkerStatus;
   working_place: string | null;
   work_type: string | null;

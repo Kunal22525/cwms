@@ -102,6 +102,10 @@ export default function WorkersPage() {
     working_place: '',
     work_type: '',
     working_since: '',
+    bank_name: '',
+    account_number: '',
+    ifsc: '',
+    branch: '',
     status: 'Active',
     is_temporary: false,
   });
@@ -182,6 +186,10 @@ export default function WorkersPage() {
       working_place: '',
       work_type: '',
       working_since: '',
+      bank_name: '',
+      account_number: '',
+      ifsc: '',
+      branch: '',
       status: 'Active',
       is_temporary: false,
     });
@@ -207,6 +215,10 @@ export default function WorkersPage() {
       working_place: worker.working_place ?? '',
       work_type: worker.work_type ?? '',
       working_since: worker.working_since ?? '',
+      bank_name: worker.bank_name ?? '',
+      account_number: worker.account_number ?? '',
+      ifsc: worker.ifsc ?? '',
+      branch: worker.branch ?? '',
       status: worker.status,
       is_temporary: worker.is_temporary ?? false,
     });
@@ -300,6 +312,12 @@ export default function WorkersPage() {
         working_since: form.working_since || null,
         status: form.status,
         is_temporary: form.is_temporary ?? false,
+        ...(form.bank_name ? { bank_name: form.bank_name } : {}),
+        ...(form.account_number
+          ? { account_number: form.account_number.replace(/\s/g, '') }
+          : {}),
+        ...(form.ifsc ? { ifsc: form.ifsc.trim().toUpperCase() } : {}),
+        ...(form.branch ? { branch: form.branch } : {}),
       };
 
       if (editingWorker) {
@@ -787,6 +805,54 @@ export default function WorkersPage() {
                   onChange={(e) => setForm({ ...form, work_type: e.target.value })}
                   placeholder="e.g. Plastering"
                 />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border/60 p-3 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Bank Details (shown on salary sheet export)
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bank_name">Bank Name</Label>
+                  <Input
+                    id="bank_name"
+                    value={form.bank_name ?? ''}
+                    onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
+                    placeholder="e.g. State Bank of India"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="branch">Branch</Label>
+                  <Input
+                    id="branch"
+                    value={form.branch ?? ''}
+                    onChange={(e) => setForm({ ...form, branch: e.target.value })}
+                    placeholder="e.g. Ormanjhi"
+                  />
+                  {errors.branch && <p className="text-xs text-destructive">{errors.branch}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="account_number">Account Number (optional)</Label>
+                  <Input
+                    id="account_number"
+                    inputMode="numeric"
+                    value={form.account_number ?? ''}
+                    onChange={(e) => setForm({ ...form, account_number: e.target.value })}
+                    placeholder="9-18 digits"
+                  />
+                  {errors.account_number && <p className="text-xs text-destructive">{errors.account_number}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ifsc">IFSC Code (optional)</Label>
+                  <Input
+                    id="ifsc"
+                    value={form.ifsc ?? ''}
+                    onChange={(e) => setForm({ ...form, ifsc: e.target.value })}
+                    placeholder="e.g. SBIN0001234"
+                  />
+                  {errors.ifsc && <p className="text-xs text-destructive">{errors.ifsc}</p>}
+                </div>
               </div>
             </div>
 

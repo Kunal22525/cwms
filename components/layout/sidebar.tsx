@@ -18,6 +18,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useCompanySettings } from '@/lib/company-settings';
+import { COMPANY_NAME, COMPANY_LOGO_URL } from '@/lib/company';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 interface NavItem {
@@ -53,20 +54,16 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          {company?.logo_url ? (
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={company.logo_url} alt="Company logo" className="object-contain" />
-              <AvatarFallback>
-                <HardHat className="h-5 w-5 text-primary" />
-              </AvatarFallback>
-            </Avatar>
-          ) : (
-            <HardHat className="h-5 w-5 text-primary" />
-          )}
+          <Avatar className="h-8 w-8">
+            <AvatarImage src={company?.logo_url ?? COMPANY_LOGO_URL} alt="Company logo" className="object-contain" />
+            <AvatarFallback>
+              <HardHat className="h-5 w-5 text-primary" />
+            </AvatarFallback>
+          </Avatar>
         </div>
         <div className="flex flex-col">
           <span className="max-w-[9rem] truncate text-sm font-bold text-foreground">
-            {company?.company_name ?? 'CWMS'}
+            {COMPANY_NAME}
           </span>
           <span className="max-w-[9rem] truncate text-[10px] text-muted-foreground">
             {company?.tagline ?? 'Workforce Manager'}

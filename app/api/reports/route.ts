@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import ExcelJS from 'exceljs';
 import { createClient } from '@/lib/supabase/server';
+import { COMPANY_NAME } from '@/lib/company';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,10 @@ interface WorkerLite {
   is_temporary: boolean;
   status: string;
   site_name: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  ifsc: string | null;
+  branch: string | null;
 }
 
 interface AttRow {
@@ -150,13 +155,14 @@ export async function POST(request: NextRequest) {
   const company: CompanyLike = (companyRow as CompanyLike | null) ?? {};
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = company.company_name ?? 'CWMS';
+  wb.creator = COMPANY_NAME;
 
   // Load company logo (public URL, embeddable server-side)
   let logoImageId: number | null = null;
-  if (company.logo_url) {
+  const logoSource = company.logo_url ?? `${request.nextUrl.origin}/logo.png`;
+  if (logoSource) {
     try {
-      const res = await fetch(company.logo_url, { cache: 'force-cache' });
+      const res = await fetch(logoSource, { cache: 'no-store' });
       if (res.ok) {
         const buf = await res.arrayBuffer();
         const contentType = res.headers.get('content-type') ?? '';
@@ -189,12 +195,24 @@ export async function POST(request: NextRequest) {
     let wq = supabase
       .from('workers')
       .select(
-        'id, worker_code, name, trade, daily_wage, pf_percentage, is_temporary, status, site:sites(site_name)'
+        'id, worker_code, name, trade, daily_wage, pf_percentage, is_temporary, status, bank_name, account_number, ifsc, branch, site:sites(site_name)'
       )
       .order('name');
     if (siteId !== 'all') wq = wq.eq('site_id', siteId);
-    const { data: wData } = await wq;
-    workers = ((wData as unknown as any[]) ?? []).map((w) => ({
+    const { data: wData, error: wErr } = await wq;
+    let wRows = wData as unknown as any[] | null;
+    if (wErr || !wRows) {
+      const wq2 = supabase
+        .from('workers')
+        .select(
+          'id, worker_code, name, trade, daily_wage, pf_percentage, is_temporary, status, site:sites(site_name)'
+        )
+        .order('name');
+      if (siteId !== 'all') wq2.eq('site_id', siteId);
+      const r2 = await wq2;
+      wRows = r2.data as unknown as any[] | null;
+    }
+    workers = ((wRows ?? []) as any[]).map((w) => ({
       id: w.id,
       worker_code: w.worker_code,
       name: w.name,
@@ -204,6 +222,10 @@ export async function POST(request: NextRequest) {
       is_temporary: !!w.is_temporary,
       status: w.status,
       site_name: w.site?.site_name ?? '—',
+      bank_name: w.bank_name ?? null,
+      account_number: w.account_number ?? null,
+      ifsc: w.ifsc ?? null,
+      branch: w.branch ?? null,
     }));
 
     let aq = supabase
@@ -259,7 +281,7 @@ export async function POST(request: NextRequest) {
     ws.getRow(1).height = 58;
     ws.getCell(1, 1).value = '';
     ws.mergeCells(1, 2, 1, lastCol);
-    nameCell.value = company.company_name ?? 'Construction Workforce Manager';
+    nameCell.value = COMPANY_NAME;
     nameCell.font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
     nameCell.alignment = { vertical: 'middle' };
     ws.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14263B' } };
@@ -314,7 +336,7 @@ export async function POST(request: NextRequest) {
 
     const workerMap = new Map(workers.map((w) => [w.id, w]));
     for (const wid of Object.keys(attByWorker)) {
-      if (!workerMap.has(wid)) workerMap.set(wid, { id: wid, worker_code: '', name: '(removed)', trade: '', daily_wage: 0, pf_percentage: 0, is_temporary: false, status: '', site_name: '—' });
+      if (!workerMap.has(wid)) workerMap.set(wid, { id: wid, worker_code: '', name: '(removed)', trade: '', daily_wage: 0, pf_percentage: 0, is_temporary: false, status: '', site_name: '—', bank_name: null, account_number: null, ifsc: null, branch: null });
     }
 
     const advByWorker: Record<string, { amount: number; status: string; request_date: string }> = {};
@@ -374,10 +396,6 @@ export async function POST(request: NextRequest) {
       otT += otH; otAmtT += otAmount; pfT += pf; dedT += ded; grossT += gross; advT += monthlyAdvance; advBalT += advanceBalance; netT += net;
     }
 
-    const lastCol = 20;
-    const widths = [10, 22, 18, 22, 12, 9, 9, 9, 9, 8, 10, 22, 9, 11, 12, 10, 12, 13, 13, 13];
-    const sheetWidths = widths;
-
     // ---- KPI Sheet ----
     const kpi = wb.addWorksheet('KPI Summary');
     setWidths(kpi, [34, 26]);
@@ -420,29 +438,41 @@ export async function POST(request: NextRequest) {
 
     // ---- Salary Sheet ----
     const ss = wb.addWorksheet('Salary Sheet');
-    ss.views = [{ state: 'frozen', ySplit: 8 }];
-    setWidths(ss, sheetWidths);
-    addHeader(ss, 'Monthly Salary Sheet', `Month: ${monthLabel(month || '')}  •  Site: ${siteId === 'all' ? 'All Sites' : 'Selected'}  •  Generated: ${genDate}`, lastCol);
-    const headers = ['Code', 'Worker Name', 'Role', 'Site', 'Daily Wage (₹)', 'Present', 'Half', 'Paid Lv', 'Unpaid Lv', 'Absent', 'Days Paid', 'Earnings Calc', 'OT (hrs)', 'OT Amt (₹)', 'Gross (₹)', 'PF (₹)', 'Deduction (₹)', 'Monthly Adv (₹)', 'Adv Balance (₹)', 'Net Payable (₹)'];
+    ss.views = [{ state: 'frozen', ySplit: 7 }];
+    const ssCols = 16;
+    setWidths(ss, [6, 26, 14, 20, 12, 12, 10, 14, 12, 14, 14, 16, 20, 18, 16, 14]);
+    addHeader(ss, 'Monthly Salary Sheet', '', ssCols);
+    const siteLabel =
+      siteId === 'all'
+        ? 'ALL SITES'
+        : (workers.find((w) => w.site_name)?.site_name ?? 'SELECTED SITE');
+    ss.getCell(3, 1).value = `CLIENT : ${siteLabel}`;
+    ss.getCell(3, 1).font = { bold: true, size: 12, color: { argb: 'FF14263B' } };
+    ss.getCell(4, 1).value = `MONTH : ${monthLabel(month || '').toUpperCase()}`;
+    ss.getCell(4, 1).font = { bold: true, size: 11, color: { argb: 'FF14263B' } };
+    const headers = ['S.No', 'Employee Name', 'Employee Code', 'Designation', 'Status', 'Total Days', 'OT (hrs)', 'Gross (₹)', 'PF (₹)', 'Deduction (₹)', 'Monthly Adv (₹)', 'Net Payable (₹)', 'Bank Name', 'Account No.', 'Branch', 'IFSC'];
     for (let c = 1; c <= headers.length; c++) {
       ss.getRow(6).getCell(c).value = headers[c - 1];
     }
     styleHeaderRow(ss, 6, headers.length);
     let rr = 7;
+    const daysPaidT = rows.reduce((s, r) => s + r.daysPaid, 0);
+    let sno = 0;
     for (const row of rows) {
       const w = row.worker;
+      sno++;
       const cells: (string | number)[] = [
-        w.worker_code, w.name, w.trade ?? '', w.site_name ?? '—', money(w.daily_wage ?? 0),
-        row.present, row.half, row.paidLeave, row.unpaidLeave, row.absent,
-        row.daysPaid, row.calcText,
-        row.otHours, money(row.otAmount), money(row.gross), money(row.pf), money(row.deduction),
-        money(row.monthlyAdvance), money(row.advanceBalance), money(row.net),
+        sno, w.name, w.worker_code, w.trade ?? '', w.status ?? 'Active',
+        row.daysPaid, row.otHours, money(row.gross), money(row.pf), money(row.deduction),
+        money(row.monthlyAdvance), money(row.net),
+        w.bank_name ?? '', w.account_number ?? '', w.branch ?? '', w.ifsc ?? '',
       ];
       cells.forEach((v, i) => {
         const cell = ss.getRow(rr).getCell(i + 1);
         cell.value = v;
         styleDataCell(cell);
-        if (i === 4 || i >= 13) cell.numFmt = '#,##0.00';
+        if (i === 5 || i === 6) cell.numFmt = '0.0';
+        else if (i >= 7 && i <= 11) cell.numFmt = '#,##0.00';
       });
       ss.getRow(rr).height = 20;
       if (rr % 2 === 0) {
@@ -453,20 +483,21 @@ export async function POST(request: NextRequest) {
       rr++;
     }
     // Totals row
-    const totals: (string | number)[] = ['TOTAL', '', '', '', '', presentT, halfT, paidT, unpaidT, absentT, '', '', money(otT), money(otAmtT), money(grossT), money(pfT), money(dedT), money(advT), money(advBalT), money(netT)];
+    const totals: (string | number)[] = ['TOTAL', '', '', '', '', round2(daysPaidT), money(otT), money(grossT), money(pfT), money(dedT), money(advT), money(netT), '', '', '', ''];
     totals.forEach((v, i) => {
       const cell = ss.getRow(rr).getCell(i + 1);
       cell.value = v;
       cell.font = { bold: true };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
       cell.border = { top: BORDER_H, bottom: BORDER_H, left: BORDER, right: BORDER };
-      if (i >= 5) cell.numFmt = i >= 12 ? '#,##0.00' : '0';
+      if (i === 5 || i === 6) cell.numFmt = '0.0';
+      else if (i >= 7 && i <= 11) cell.numFmt = '#,##0.00';
     });
     ss.getRow(rr).height = 22;
     const noteRow = rr + 2;
-    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Gross = Daily Wage × Working Days (shown in Earnings Calc). Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%). Net Payable = Gross + OT Amount − PF − Deductions − Monthly Approved Advances.';
+    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Gross = Daily Wage × Working Days. Overtime = (Daily Wage ÷ 8) × OT hrs. PF = Gross × PF% (default 12%). Net Payable = Gross + OT Amount − PF − Deductions − Monthly Approved Advances.';
     ss.getCell(noteRow, 1).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
-    ss.mergeCells(noteRow, 1, noteRow, lastCol);
+    ss.mergeCells(noteRow, 1, noteRow, ssCols);
 
     // ---- Attendance Register ----
     const reg = wb.addWorksheet('Attendance Register');

@@ -2,11 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase/client';
+import { COMPANY_NAME } from '@/lib/company';
 import type { CompanySettings } from '@/types';
 
 const DEFAULT_SETTINGS: CompanySettings = {
   id: true,
-  company_name: 'Construction Workforce Manager',
+  company_name: COMPANY_NAME,
   tagline: 'Workforce Management System',
   logo_url: null,
   phone: null,

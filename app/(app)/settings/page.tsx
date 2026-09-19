@@ -16,6 +16,7 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useCompanySettings } from '@/lib/company-settings';
+import { COMPANY_NAME } from '@/lib/company';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,6 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
 
-  const [companyName, setCompanyName] = useState(company?.company_name ?? '');
   const [tagline, setTagline] = useState(company?.tagline ?? '');
   const [companyPhone, setCompanyPhone] = useState(company?.phone ?? '');
   const [companyEmail, setCompanyEmail] = useState(company?.email ?? '');
@@ -172,7 +172,7 @@ export default function SettingsPage() {
       const { error } = await supabase.from('company_settings').upsert(
         {
           id: true,
-          company_name: companyName.trim() || 'Construction Workforce Manager',
+          company_name: COMPANY_NAME,
           tagline: tagline.trim(),
           phone: companyPhone.trim() || null,
           email: companyEmail.trim() || null,
@@ -330,7 +330,7 @@ export default function SettingsPage() {
                   )}
                 </div>
                 <div>
-                  <p className="text-lg font-bold">{company?.company_name ?? 'Construction Workforce Manager'}</p>
+                  <p className="text-lg font-bold">{COMPANY_NAME}</p>
                   <p className="text-sm text-muted-foreground">Version 1.0</p>
                 </div>
               </div>
@@ -413,11 +413,10 @@ export default function SettingsPage() {
 
                     <div className="space-y-2">
                       <Label>Company Name</Label>
-                      <Input
-                        value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
-                        placeholder="e.g. Sharma Constructions Pvt. Ltd."
-                      />
+                      <Input value={COMPANY_NAME} disabled readOnly className="bg-muted/50" />
+                      <p className="text-xs text-muted-foreground">
+                        Company name is fixed and cannot be edited here.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label>Tagline</Label>
