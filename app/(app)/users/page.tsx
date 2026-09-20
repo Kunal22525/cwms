@@ -55,7 +55,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { inviteUserSchema, type InviteUserFormValues } from '@/lib/validations';
-import { formatDate, initials } from '@/lib/utils';
+import { formatDate, initials, roleLabel } from '@/lib/utils';
 import type { Profile, AppRole } from '@/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
@@ -69,6 +69,7 @@ export default function UsersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleChangeUser, setRoleChangeUser] = useState<{ profile: Profile; currentRole: AppRole } | null>(null);
+  const [roleChangeTarget, setRoleChangeTarget] = useState<AppRole>('supervisor');
   const [deleteUser, setDeleteUser] = useState<Profile | null>(null);
 
   const [form, setForm] = useState<InviteUserFormValues>({
@@ -185,24 +186,32 @@ export default function UsersPage() {
 
   const handleRoleChange = async () => {
     if (!roleChangeUser) return;
-    const newRole: AppRole = roleChangeUser.currentRole === 'admin' ? 'supervisor' : 'admin';
+    const newRole: AppRole = roleChangeTarget;
 
+    setSubmitting(true);
     try {
-      const { error } = await supabase
-        .from('user_roles')
-        .update({ role: newRole })
-        .eq('user_id', roleChangeUser.profile.id);
+      const res = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: roleChangeUser.profile.id, role: newRole }),
+      });
 
-      if (error) throw error;
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update role');
+      }
 
       toast({
         title: 'Role updated',
-        description: `${roleChangeUser.profile.full_name} is now ${newRole}.`,
+        description: `${roleChangeUser.profile.full_name} is now ${roleLabel(newRole)}.`,
       });
       queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       toast({ variant: 'destructive', title: 'Update failed', description: message });
+    } finally {
+      setSubmitting(false);
     }
     setRoleChangeUser(null);
   };
@@ -280,8 +289,16 @@ export default function UsersPage() {
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">{u.mobile ?? '—'}</TableCell>
                   <TableCell>
-                    <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="capitalize">
-                      {u.role}
+                    <Badge
+                      variant={
+                        u.role === 'admin'
+                          ? 'default'
+                          : u.role === 'site_incharge'
+                            ? 'outline'
+                            : 'secondary'
+                      }
+                    >
+                      {roleLabel(u.role)}
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">
@@ -292,7 +309,10 @@ export default function UsersPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setRoleChangeUser({ profile: u, currentRole: u.role })}
+                        onClick={() => {
+                          setRoleChangeTarget(u.role);
+                          setRoleChangeUser({ profile: u, currentRole: u.role });
+                        }}
                       >
                         <Shield className="mr-1 h-4 w-4" />
                         Change Role
@@ -379,8 +399,15 @@ export default function UsersPage() {
                 <SelectContent>
                   <SelectItem value="supervisor">Supervisor</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="site_incharge">Site Incharge</SelectItem>
                 </SelectContent>
               </Select>
+              {form.role === 'site_incharge' && (
+                <p className="text-xs text-muted-foreground">
+                  Site incharge accounts require admin/supervisor approval and a
+                  site assignment on the Approvals page.
+                </p>
+              )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
@@ -395,27 +422,44 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Role Change Confirmation */}
-      <AlertDialog open={!!roleChangeUser} onOpenChange={(open) => !open && setRoleChangeUser(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Change role to {roleChangeUser?.currentRole === 'admin' ? 'Supervisor' : 'Admin'}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {roleChangeUser?.currentRole === 'admin'
-                ? `This will remove admin privileges from ${roleChangeUser?.profile.full_name}.`
-                : `This will grant admin privileges to ${roleChangeUser?.profile.full_name}.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRoleChange}>
-              Confirm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Role Change Dialog */}
+      <Dialog open={!!roleChangeUser} onOpenChange={(open) => !open && setRoleChangeUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change role</DialogTitle>
+            <DialogDescription>
+              Set the new role for {roleChangeUser?.profile.full_name}. Changing a
+              site incharge&apos;s role cancels their request and removes any site
+              assignment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Role</Label>
+            <Select
+              value={roleChangeTarget}
+              onValueChange={(v) => setRoleChangeTarget(v as AppRole)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="supervisor">Supervisor</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="site_incharge">Site Incharge</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRoleChangeUser(null)} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleRoleChange} disabled={submitting || roleChangeTarget === roleChangeUser?.currentRole}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Change Role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete User Confirmation */}
       <AlertDialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>

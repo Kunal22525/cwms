@@ -13,6 +13,7 @@ import {
   UserCog,
   Settings,
   HardHat,
+  BadgeCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  approversOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -34,6 +36,7 @@ const navItems: NavItem[] = [
   { label: 'Workers', href: '/workers', icon: Users },
   { label: 'Attendance', href: '/attendance', icon: CalendarCheck },
   { label: 'Salary Advances', href: '/salary-advances', icon: Wallet },
+  { label: 'Approvals', href: '/approvals', icon: BadgeCheck, approversOnly: true },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
   { label: 'Documents', href: '/documents', icon: FileText },
   { label: 'Users', href: '/users', icon: UserCog, adminOnly: true },
@@ -46,7 +49,10 @@ export function Sidebar() {
   const { data: company } = useCompanySettings();
 
   const visibleItems = navItems.filter(
-    (item) => !item.adminOnly || role === 'admin'
+    (item) =>
+      item.approversOnly
+        ? role === 'admin' || role === 'supervisor'
+        : !item.adminOnly || role === 'admin'
   );
 
   return (
@@ -111,7 +117,10 @@ export function MobileNav() {
   const { role } = useAuth();
 
   const visibleItems = navItems.filter(
-    (item) => !item.adminOnly || role === 'admin'
+    (item) =>
+      item.approversOnly
+        ? role === 'admin' || role === 'supervisor'
+        : !item.adminOnly || role === 'admin'
   );
 
   return (

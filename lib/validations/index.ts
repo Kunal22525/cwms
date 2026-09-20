@@ -105,7 +105,7 @@ export const inviteUserSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
   full_name: z.string().min(1, 'Full name is required'),
   mobile: z.string().optional(),
-  role: z.enum(['admin', 'supervisor']),
+  role: z.enum(['admin', 'supervisor', 'site_incharge']),
 });
 
 export type InviteUserFormValues = z.infer<typeof inviteUserSchema>;

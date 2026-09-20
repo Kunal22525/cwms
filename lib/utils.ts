@@ -1,8 +1,22 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import type { AppRole } from '@/types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+export function roleLabel(role: AppRole | string | null | undefined): string {
+  switch (role) {
+    case 'admin':
+      return 'Admin';
+    case 'supervisor':
+      return 'Supervisor';
+    case 'site_incharge':
+      return 'Site Incharge';
+    default:
+      return '—';
+  }
 }
 
 export function formatCurrency(amount: number | null | undefined): string {

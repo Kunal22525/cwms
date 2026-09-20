@@ -1,4 +1,4 @@
-export type AppRole = 'admin' | 'supervisor';
+export type AppRole = 'admin' | 'supervisor' | 'site_incharge';
 
 export type SiteStatus = 'Active' | 'Inactive';
 
@@ -37,10 +37,12 @@ export interface Site {
   working_from: string | null;
   working_to: string | null;
   supervisor_id: string | null;
+  site_incharge_id: string | null;
   status: SiteStatus;
   created_at: string;
   updated_at: string;
   supervisor?: Profile | null;
+  site_incharge?: Profile | null;
   worker_count?: number;
 }
 
@@ -136,6 +138,43 @@ export interface ReportLog {
 
 export interface UserWithRole extends Profile {
   role: AppRole;
+}
+
+export type SiteInchargeRequestStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export interface SiteInchargeRequest {
+  id: string;
+  user_id: string;
+  site_id: string | null;
+  status: SiteInchargeRequestStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+  full_name?: string;
+  email?: string;
+  site_name?: string | null;
+}
+
+export type WorkerChangeRequestType = 'add' | 'delete';
+
+export interface WorkerChangeRequest {
+  id: string;
+  request_type: WorkerChangeRequestType;
+  worker_id: string | null;
+  site_id: string | null;
+  payload: Record<string, unknown> | null;
+  reason: string | null;
+  status: SiteInchargeRequestStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+  worker_name?: string | null;
+  site_name?: string | null;
+  requester_name?: string | null;
 }
 
 export interface CompanySettings {

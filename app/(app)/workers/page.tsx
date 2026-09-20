@@ -15,6 +15,7 @@ import {
   Upload,
   X,
   Trash2,
+  ClipboardList,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -64,7 +65,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { workerSchema, type WorkerFormValues } from '@/lib/validations';
 import { formatCurrency, formatDate, initials } from '@/lib/utils';
-import type { Worker, Site } from '@/types';
+import type { Worker, Site, WorkerChangeRequest } from '@/types';
 
 const PHOTO_MAX_SIZE = 5 * 1024 * 1024;
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -79,6 +80,9 @@ export default function WorkersPage() {
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [deleteWorker, setDeleteWorker] = useState<Worker | null>(null);
   const [convertWorker, setConvertWorker] = useState<Worker | null>(null);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [requestDeleteWorker, setRequestDeleteWorker] = useState<Worker | null>(null);
+  const [requesting, setRequesting] = useState(false);
   const [search, setSearch] = useState('');
   const [siteFilter, setSiteFilter] = useState('all');
   const [tradeFilter, setTradeFilter] = useState('all');
@@ -110,6 +114,27 @@ export default function WorkersPage() {
     is_temporary: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [requestForm, setRequestForm] = useState<{
+    name: string;
+    mobile: string;
+    trade: string;
+    daily_wage: number | null;
+    joining_date: string;
+    working_place: string;
+    work_type: string;
+    reason: string;
+  }>({
+    name: '',
+    mobile: '',
+    trade: '',
+    daily_wage: null,
+    joining_date: '',
+    working_place: '',
+    work_type: '',
+    reason: '',
+  });
+  const [requestDeleteReason, setRequestDeleteReason] = useState('');
 
   const PAGE_SIZE = 10;
 
@@ -162,6 +187,16 @@ export default function WorkersPage() {
       const unique = [...new Set(((data as { trade: string }[]) ?? []).map((w) => w.trade).filter(Boolean))];
       return unique as string[];
     },
+  });
+
+  const { data: changeRequests } = useQuery({
+    queryKey: ['worker-change-requests'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('list_worker_change_requests');
+      if (error) throw error;
+      return (data as WorkerChangeRequest[]) ?? [];
+    },
+    enabled: role === 'site_incharge',
   });
 
   useEffect(() => {
@@ -362,6 +397,88 @@ export default function WorkersPage() {
 
   const canManage = role === 'admin';
 
+  const isSiteIncharge = role === 'site_incharge';
+  const mySite = isSiteIncharge ? (sites?.[0] ?? null) : null;
+
+  const submitAddRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!mySite) {
+      toast({ variant: 'destructive', title: 'No site assigned', description: 'You need to be assigned a site before requesting workers.' });
+      return;
+    }
+    if (!requestForm.name.trim()) {
+      toast({ variant: 'destructive', title: 'Missing field', description: 'Worker name is required.' });
+      return;
+    }
+    if (!requestForm.trade.trim()) {
+      toast({ variant: 'destructive', title: 'Missing field', description: 'Role is required.' });
+      return;
+    }
+
+    setRequesting(true);
+    try {
+      const { error } = await supabase.from('worker_change_requests').insert({
+        request_type: 'add',
+        site_id: mySite.id,
+        payload: {
+          name: requestForm.name.trim(),
+          mobile: requestForm.mobile || null,
+          trade: requestForm.trade.trim(),
+          daily_wage: requestForm.daily_wage,
+          joining_date: requestForm.joining_date || null,
+          working_place: requestForm.working_place || null,
+          work_type: requestForm.work_type || null,
+          is_temporary: false,
+          status: 'Active',
+        },
+        reason: requestForm.reason || null,
+        requested_by: user?.id ?? null,
+      });
+      if (error) throw error;
+
+      toast({ title: 'Request submitted', description: `${requestForm.name.trim()} will be added to ${mySite.site_name} once approved.` });
+      queryClient.invalidateQueries({ queryKey: ['worker-change-requests'] });
+      setRequestDialogOpen(false);
+      setRequestForm({ name: '', mobile: '', trade: '', daily_wage: null, joining_date: '', working_place: '', work_type: '', reason: '' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Request failed', description: message });
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  const submitDeleteRequest = async () => {
+    if (!requestDeleteWorker) return;
+    setRequesting(true);
+    try {
+      const { error } = await supabase.from('worker_change_requests').insert({
+        request_type: 'delete',
+        worker_id: requestDeleteWorker.id,
+        site_id: requestDeleteWorker.site_id,
+        payload: {
+          name: requestDeleteWorker.name,
+          worker_code: requestDeleteWorker.worker_code,
+          trade: requestDeleteWorker.trade,
+        },
+        reason: requestDeleteReason || null,
+        requested_by: user?.id ?? null,
+      });
+      if (error) throw error;
+
+      toast({ title: 'Request submitted', description: `A request to remove ${requestDeleteWorker.name} was submitted for approval.` });
+      queryClient.invalidateQueries({ queryKey: ['worker-change-requests'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Request failed', description: message });
+    } finally {
+      setRequesting(false);
+      setRequestDeleteWorker(null);
+      setRequestDeleteReason('');
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteWorker) return;
     try {
@@ -410,11 +527,65 @@ export default function WorkersPage() {
             Add Worker
           </Button>
         )}
+        {isSiteIncharge && (
+          <Button onClick={() => setRequestDialogOpen(true)} disabled={!mySite}>
+            <Plus className="mr-2 h-4 w-4" />
+            Request to Add Worker
+          </Button>
+        )}
       </PageHeader>
 
       {!sites?.length && canManage && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-warning/5 p-4 text-sm text-warning">
           You need to create at least one site before adding workers.
+        </div>
+      )}
+
+      {isSiteIncharge && !mySite && (
+        <div className="mb-4 rounded-lg border border-warning/20 bg-warning/5 p-4 text-sm text-warning">
+          You have not been assigned a site yet. Contact an admin or supervisor
+          to assign you a site.
+        </div>
+      )}
+
+      {isSiteIncharge && !!changeRequests?.length && (
+        <div className="mb-4 rounded-lg border border-border/60">
+          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+            <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">My Worker Requests</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Worker</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden md:table-cell">Reason</TableHead>
+                  <TableHead className="hidden md:table-cell">Requested</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {changeRequests!.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="capitalize">{r.request_type}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {r.worker_name ?? ((r.payload as { name?: string } | null)?.name ?? 'New worker')}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={r.status} />
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-muted-foreground">
+                      {r.reason ?? '—'}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-muted-foreground">
+                      {formatDate(r.created_at)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
@@ -542,6 +713,19 @@ export default function WorkersPage() {
                           <Eye className="h-4 w-4" />
                         </Link>
                       </Button>
+                      {isSiteIncharge && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Request to remove worker"
+                          onClick={() => {
+                            setRequestDeleteReason('');
+                            setRequestDeleteWorker(worker);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                       {canManage && (
                         <>
                           {worker.is_temporary && (
@@ -946,6 +1130,140 @@ export default function WorkersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    <AlertDialog open={!!requestDeleteWorker} onOpenChange={(open) => !open && setRequestDeleteWorker(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Request to remove worker?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &quot;{requestDeleteWorker?.name}&quot;
+              {requestDeleteWorker?.worker_code ? ` (${requestDeleteWorker.worker_code})` : ''} will be
+              removed once an admin or supervisor approves your request.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="requestDeleteReason">Reason (optional)</Label>
+            <Textarea
+              id="requestDeleteReason"
+              value={requestDeleteReason}
+              onChange={(e) => setRequestDeleteReason(e.target.value)}
+              rows={2}
+              placeholder="Why should this worker be removed?"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={requesting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={submitDeleteRequest}
+              disabled={requesting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {requesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Submit Request
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Request to Add Worker Dialog */}
+      <Dialog open={requestDialogOpen} onOpenChange={setRequestDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request to Add Worker</DialogTitle>
+            <DialogDescription>
+              Your request is approved by an admin or supervisor before the worker is created
+              {mySite ? ` on ${mySite.site_name}.` : '.'}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitAddRequest} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="rq_name">Name</Label>
+                <Input
+                  id="rq_name"
+                  value={requestForm.name}
+                  onChange={(e) => setRequestForm({ ...requestForm, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rq_mobile">Mobile</Label>
+                <Input
+                  id="rq_mobile"
+                  value={requestForm.mobile}
+                  onChange={(e) => setRequestForm({ ...requestForm, mobile: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="rq_trade">Role</Label>
+                <Input
+                  id="rq_trade"
+                  value={requestForm.trade}
+                  onChange={(e) => setRequestForm({ ...requestForm, trade: e.target.value })}
+                  placeholder="e.g. Mason, Electrician"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rq_wage">Daily Wage (₹)</Label>
+                <Input
+                  id="rq_wage"
+                  type="number"
+                  value={requestForm.daily_wage ?? ''}
+                  onChange={(e) => setRequestForm({ ...requestForm, daily_wage: e.target.value ? Number(e.target.value) : null })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="rq_joining">Joining Date</Label>
+                <Input
+                  id="rq_joining"
+                  type="date"
+                  value={requestForm.joining_date}
+                  onChange={(e) => setRequestForm({ ...requestForm, joining_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rq_place">Working Place</Label>
+                <Input
+                  id="rq_place"
+                  value={requestForm.working_place}
+                  onChange={(e) => setRequestForm({ ...requestForm, working_place: e.target.value })}
+                  placeholder="e.g. Block B"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rq_worktype">Type of Work</Label>
+              <Input
+                id="rq_worktype"
+                value={requestForm.work_type}
+                onChange={(e) => setRequestForm({ ...requestForm, work_type: e.target.value })}
+                placeholder="e.g. Plastering"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rq_reason">Reason (optional)</Label>
+              <Textarea
+                id="rq_reason"
+                value={requestForm.reason}
+                onChange={(e) => setRequestForm({ ...requestForm, reason: e.target.value })}
+                rows={2}
+                placeholder="Any details the approvers should know"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRequestDialogOpen(false)} disabled={requesting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={requesting}>
+                {requesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Submit Request
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

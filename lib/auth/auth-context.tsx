@@ -41,10 +41,17 @@ async function fetchProfileAndRole(
   }
 
   // The user_roles table is RLS-locked to admins only, so role is determined
-  // via the SECURITY DEFINER has_role() function. New users default to
-  // supervisor; admin is the only elevated role.
+  // via the SECURITY DEFINER has_role() function. Precedence: admin >
+  // site_incharge > supervisor.
   const { data: isAdmin } = await supabase.rpc('has_role', { p_role: 'admin' });
-  role = isAdmin ? 'admin' : 'supervisor';
+  if (isAdmin) {
+    role = 'admin';
+  } else {
+    const { data: isSiteIncharge } = await supabase.rpc('has_role', {
+      p_role: 'site_incharge',
+    });
+    role = isSiteIncharge ? 'site_incharge' : 'supervisor';
+  }
 
   return { profile, role };
 }

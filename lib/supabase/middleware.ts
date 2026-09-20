@@ -8,6 +8,7 @@ const PROTECTED_PREFIXES = [
   '/workers',
   '/attendance',
   '/salary-advances',
+  '/approvals',
   '/reports',
   '/documents',
   '/users',
@@ -16,6 +17,8 @@ const PROTECTED_PREFIXES = [
 
 const ADMIN_ONLY_PREFIXES = ['/sites', '/users'];
 
+const APPROVERS_ONLY_PREFIXES = ['/approvals'];
+
 const isProtected = (pathname: string) =>
   PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(p + '/')
@@ -23,6 +26,11 @@ const isProtected = (pathname: string) =>
 
 const isAdminOnly = (pathname: string) =>
   ADMIN_ONLY_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + '/')
+  );
+
+const isApproversOnly = (pathname: string) =>
+  APPROVERS_ONLY_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(p + '/')
   );
 
@@ -82,6 +90,22 @@ export async function updateSession(request: NextRequest) {
       p_role: 'admin',
     });
     if (!isAdmin) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  // Enforce approver-only routes (Approvals) — admins and supervisors only
+  if (user && isApproversOnly(pathname)) {
+    const { data: isAdmin } = await supabase.rpc('has_role', {
+      p_role: 'admin',
+    });
+    const { data: isSupervisor } = await supabase.rpc('has_role', {
+      p_role: 'supervisor',
+    });
+    if (!isAdmin && !isSupervisor) {
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';
       url.search = '';
