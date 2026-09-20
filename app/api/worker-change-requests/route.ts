@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
         aadhaar: payload.aadhaar ?? null,
         trade: payload.trade,
         daily_wage: payload.daily_wage ?? null,
-        pf_percentage: payload.pf_percentage ?? null,
+        pf_percentage: payload.pf_percentage ?? 12,
         joining_date: payload.joining_date ?? null,
         site_id: requestRow.site_id,
         working_place: payload.working_place ?? null,
