@@ -348,8 +348,10 @@ export default function WorkersPage() {
         status: form.status,
         is_temporary: form.is_temporary ?? false,
         ...(form.bank_name ? { bank_name: form.bank_name } : {}),
-        account_number: form.account_number.replace(/\s/g, ''),
-        ifsc: form.ifsc.trim().toUpperCase(),
+        ...(form.account_number
+          ? { account_number: form.account_number.replace(/\s/g, '') }
+          : {}),
+        ...(form.ifsc ? { ifsc: form.ifsc.trim().toUpperCase() } : {}),
         ...(form.branch ? { branch: form.branch } : {}),
       };
 

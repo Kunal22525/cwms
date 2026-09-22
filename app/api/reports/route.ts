@@ -143,6 +143,12 @@ export async function POST(request: NextRequest) {
   const { type, month = '', siteId = 'all', workerId = 'all', shift = 'all', dateFrom = '', dateTo = '', advanceStatus = 'all' } =
     body;
 
+  let effMonth = month;
+  if (!effMonth) {
+    const d = new Date();
+    effMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
   if (!type) {
     return NextResponse.json({ error: 'Missing report type' }, { status: 400 });
   }
@@ -184,13 +190,9 @@ export async function POST(request: NextRequest) {
   let advances: AdvanceRow[] = [];
 
   if (type === 'salary-sheet' || type === 'monthly-attendance' || type === 'site-attendance') {
-    if (!month) {
-      const d = new Date();
-      body.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    }
-    const [year, mon] = month.split('-');
+    const [year, mon] = effMonth.split('-');
     const startDate = `${year}-${mon}-01`;
-    const endDate = `${year}-${mon}-${String(daysInMonth(month)).padStart(2, '0')}`;
+    const endDate = `${year}-${mon}-${String(daysInMonth(effMonth)).padStart(2, '0')}`;
 
     let wq = supabase
       .from('workers')
@@ -326,8 +328,8 @@ export async function POST(request: NextRequest) {
 
   // ============ SALARY SHEET (main workbook) ============
   if (type === 'salary-sheet') {
-    const startDate = `${month}-01`;
-    const endDate = `${month}-${String(daysInMonth(month || `${new Date().getFullYear()}-1`)).padStart(2, '0')}`;
+    const startDate = `${effMonth}-01`;
+    const endDate = `${effMonth}-${String(daysInMonth(effMonth)).padStart(2, '0')}`;
 
     const attByWorker: Record<string, { status: string; overtime: number; deduction: number; leave_type: string | null; attendance_date: string }[]> = {};
     for (const r of attRows) {
@@ -420,10 +422,10 @@ export async function POST(request: NextRequest) {
     // ---- KPI Sheet ----
     const kpi = wb.addWorksheet('KPI Summary');
     setWidths(kpi, [34, 26]);
-    addHeader(kpi, 'Workforce KPI Summary', `Month: ${monthLabel(month || '')}  •  Generated: ${genDate}`, 2);
+    addHeader(kpi, 'Workforce KPI Summary', `Month: ${monthLabel(effMonth)}  •  Generated: ${genDate}`, 2);
     const kpiStart = 6;
     const kpiRows: [string, string | number][] = [
-      ['Month', monthLabel(month || '')],
+      ['Month', monthLabel(effMonth)],
       ['Workers in scope', regular.length],
       ['Temporary workers', temp.length],
       ['Attendance records', attRows.length],
@@ -472,7 +474,7 @@ export async function POST(request: NextRequest) {
         : (workers.find((w) => w.site_name)?.site_name ?? 'SELECTED SITE');
     ss.getCell(3, 1).value = `CLIENT : ${siteLabel}`;
     ss.getCell(3, 1).font = { bold: true, size: 12, color: { argb: 'FF14263B' } };
-    ss.getCell(4, 1).value = `MONTH : ${monthLabel(month || '').toUpperCase()}`;
+    ss.getCell(4, 1).value = `MONTH : ${monthLabel(effMonth).toUpperCase()}`;
     ss.getCell(4, 1).font = { bold: true, size: 11, color: { argb: 'FF14263B' } };
     const mainHeaders = ['S.No', 'Employee Name', 'Employee Code', 'Designation', 'Status', 'Working Days', 'OT (hrs)', 'Monthly Salary (₹)', 'Total Salary (₹)', 'PF (₹)', 'Deduction (₹)', 'Net Salary Due (₹)', 'Salary Paid', '', 'Total Due (₹)', 'Bank Name', 'Account No.', 'Branch', 'IFSC'];
     const subHeaders = ['', '', '', '', '', '', '', '', '', '', '', '', 'Paid on Site (₹)', 'Paid in Office (₹)', '', '', '', '', ''];
@@ -533,7 +535,7 @@ export async function POST(request: NextRequest) {
     reg.views = [{ state: 'frozen', ySplit: 7 }];
     const regHeaders = ['Date', 'Worker Code', 'Worker Name', 'Role', 'Site', 'Shift', 'Status', 'Leave Type', 'OT (hrs)', 'Deduction (₹)'];
     setWidths(reg, [14, 12, 24, 18, 22, 10, 12, 12, 10, 14]);
-    addHeader(reg, 'Monthly Attendance Register', `Month: ${monthLabel(month || '')}  •  Generated: ${genDate}`, regHeaders.length);
+    addHeader(reg, 'Monthly Attendance Register', `Month: ${monthLabel(effMonth)}  •  Generated: ${genDate}`, regHeaders.length);
     for (let c = 1; c <= regHeaders.length; c++) reg.getRow(6).getCell(c).value = regHeaders[c - 1];
     styleHeaderRow(reg, 6, regHeaders.length);
     const siteName = new Map(workers.map((w) => [w.id, w.site_name]));
@@ -585,7 +587,7 @@ export async function POST(request: NextRequest) {
     const sa = wb.addWorksheet('Site Attendance');
     const saHeaders = ['Site', 'Code', 'Present', 'Absent', 'Half Day', 'Paid Leave', 'Unpaid Leave', 'Total', 'OT (hrs)'];
     setWidths(sa, [28, 10, 10, 10, 11, 11, 13, 10, 10]);
-    addHeader(sa, 'Site-wise Attendance', `Month: ${monthLabel(month || '')}  •  Generated: ${genDate}`, saHeaders.length);
+    addHeader(sa, 'Site-wise Attendance', `Month: ${monthLabel(effMonth)}  •  Generated: ${genDate}`, saHeaders.length);
     for (let c = 1; c <= saHeaders.length; c++) sa.getRow(6).getCell(c).value = saHeaders[c - 1];
     styleHeaderRow(sa, 6, saHeaders.length);
     const { data: sitesData } = await supabase.from('sites').select('id, site_name, site_code').order('site_name');
@@ -623,7 +625,7 @@ export async function POST(request: NextRequest) {
     const tw = wb.addWorksheet('Temporary Workers');
     const twHeaders = ['Code', 'Name', 'Role', 'Site', 'Daily Wage', 'Present', 'Half', 'Paid Lv', 'Unpaid Lv', 'OT (hrs)', 'Gross (₹)', 'Net (₹)'];
     setWidths(tw, [10, 24, 18, 22, 12, 9, 9, 9, 11, 10, 13, 13]);
-    addHeader(tw, 'Temporary / Casual Workers', `Month: ${monthLabel(month || '')}  •  Generated: ${genDate}`, twHeaders.length);
+    addHeader(tw, 'Temporary / Casual Workers', `Month: ${monthLabel(effMonth)}  •  Generated: ${genDate}`, twHeaders.length);
     for (let c = 1; c <= twHeaders.length; c++) tw.getRow(6).getCell(c).value = twHeaders[c - 1];
     styleHeaderRow(tw, 6, twHeaders.length);
     let rr4 = 7;
@@ -660,7 +662,7 @@ export async function POST(request: NextRequest) {
       if (i >= 4) cell.numFmt = i === 4 || i >= 10 ? '#,##0.00' : '0';
     });
 
-    const fileName = `salary-sheet-${month}.xlsx`;
+    const fileName = `salary-sheet-${effMonth}.xlsx`;
     const buf = await wb.xlsx.writeBuffer();
     return new NextResponse(buf as unknown as BodyInit, {
       headers: {
@@ -677,7 +679,7 @@ export async function POST(request: NextRequest) {
     ms.views = [{ state: 'frozen', ySplit: 7 }];
     setWidths(ms, [14, 12, 24, 18, 22, 10, 12, 12, 10, 14]);
     const headers = ['Date', 'Worker Code', 'Worker Name', 'Role', 'Site', 'Shift', 'Status', 'Leave Type', 'OT (hrs)', 'Deduction (₹)'];
-    addHeader(ms, 'Monthly Attendance Report', `Month: ${monthLabel(month || '')}  •  Site: ${siteId === 'all' ? 'All' : 'Selected'}  •  Generated: ${genDate}`, headers.length);
+    addHeader(ms, 'Monthly Attendance Report', `Month: ${monthLabel(effMonth)}  •  Site: ${siteId === 'all' ? 'All' : 'Selected'}  •  Generated: ${genDate}`, headers.length);
     for (let c = 1; c <= headers.length; c++) ms.getRow(6).getCell(c).value = headers[c - 1];
     styleHeaderRow(ms, 6, headers.length);
     const wm2 = new Map(workers.map((w) => [w.id, w]));
@@ -777,7 +779,7 @@ export async function POST(request: NextRequest) {
     const sa2 = wb.addWorksheet('Site Attendance');
     setWidths(sa2, [28, 10, 10, 10, 11, 11, 13, 10, 10]);
     const headers = ['Site', 'Code', 'Present', 'Absent', 'Half Day', 'Paid Leave', 'Unpaid Leave', 'Total', 'OT (hrs)'];
-    addHeader(sa2, 'Site-wise Attendance', `Month: ${monthLabel(month || '')}  •  Generated: ${genDate}`, headers.length);
+    addHeader(sa2, 'Site-wise Attendance', `Month: ${monthLabel(effMonth)}  •  Generated: ${genDate}`, headers.length);
     for (let c = 1; c <= headers.length; c++) sa2.getRow(6).getCell(c).value = headers[c - 1];
     styleHeaderRow(sa2, 6, headers.length);
     const workerMapSites = new Map(workers.map((w) => [w.id, w.site_name]));
@@ -804,7 +806,7 @@ export async function POST(request: NextRequest) {
       sa2.getRow(rr5).height = 18;
       rr5++;
     }
-    const fileName = `site-attendance-${month}.xlsx`;
+    const fileName = `site-attendance-${effMonth}.xlsx`;
     const buf = await wb.xlsx.writeBuffer();
     return new NextResponse(buf as unknown as BodyInit, {
       headers: {

@@ -30,18 +30,18 @@ import { EmptyState } from '@/components/layout/empty-state';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, localDateStr } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { role, user } = useAuth();
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr();
   const monthPrefix = today.slice(0, 7);
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = localDateStr();
 
       const [workersRes, sitesRes, attendanceRes, advancesRes] = await Promise.all([
         supabase.from('workers').select('id', { count: 'exact', head: true }),
@@ -106,7 +106,7 @@ export default function DashboardPage() {
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = localDateStr(d);
         const { data } = await supabase
           .from('attendance')
           .select('status')

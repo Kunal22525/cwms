@@ -47,33 +47,54 @@ export const workerSchema = z.object({
   bank_name: z.string().optional(),
   account_number: z
     .string()
-    .min(1, 'Account number is required')
+    .optional()
     .refine(
-      (v) => /^[0-9]{9,18}$/.test(v.replace(/\s/g, '')),
+      (v) => !v || /^[0-9]{9,18}$/.test(v.replace(/\s/g, '')),
       'Enter a valid account number (9-18 digits)'
     ),
   ifsc: z
     .string()
-    .min(1, 'IFSC code is required')
+    .optional()
     .refine(
-      (v) => /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(v),
+      (v) => !v || /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(v),
       'Enter a valid IFSC code (e.g. SBIN0001234)'
     ),
   branch: z.string().optional(),
   joining_date: z.string().optional().nullable(),
-  site_id: z.string().uuid('Site is required'),
+  site_id: z.string().uuid('Site is required').or(z.literal('')),
   working_place: z.string().optional(),
   work_type: z.string().optional(),
   working_since: z.string().optional().nullable(),
   is_temporary: z.boolean().optional().default(false),
   status: z.enum(['Active', 'Inactive']).default('Active'),
+}).superRefine((data, ctx) => {
+  if (
+    data.bank_name &&
+    (!data.account_number || !/^[0-9]{9,18}$/.test(data.account_number.replace(/\s/g, '')))
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['account_number'],
+      message: 'Account number is required (9-18 digits) when a bank is provided',
+    });
+  }
+  if (data.bank_name && (!data.ifsc || !/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(data.ifsc))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ifsc'],
+      message: 'IFSC code is required when a bank is provided',
+    });
+  }
 });
 
 export type WorkerFormValues = z.infer<typeof workerSchema>;
 
 export const salaryAdvanceSchema = z.object({
   worker_id: z.string().uuid('Worker is required'),
-  amount: z.coerce.number().positive('Amount must be greater than 0'),
+  amount: z.coerce
+    .number()
+    .positive('Amount must be greater than 0')
+    .max(9999999999.99, 'Amount is too large'),
   request_date: z.string().min(1, 'Date is required'),
   reason: z.string().min(1, 'Reason is required'),
   remarks: z.string().optional(),
@@ -83,7 +104,10 @@ export type SalaryAdvanceFormValues = z.infer<typeof salaryAdvanceSchema>;
 
 export const salaryPaymentSchema = z.object({
   worker_id: z.string().uuid('Worker is required'),
-  amount: z.coerce.number().positive('Amount must be greater than 0'),
+  amount: z.coerce
+    .number()
+    .positive('Amount must be greater than 0')
+    .max(9999999999.99, 'Amount is too large'),
   payment_date: z.string().min(1, 'Date is required'),
   payment_location: z.enum(['On Site', 'In Office'], {
     required_error: 'Select where the salary was paid',

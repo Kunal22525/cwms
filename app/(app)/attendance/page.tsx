@@ -31,7 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
-import { cn, formatDate, initials } from '@/lib/utils';
+import { cn, formatDate, initials, localDateStr } from '@/lib/utils';
 import type { Worker, Site, AttendanceStatus } from '@/types';
 
 const STATUS_CONFIG: Record<AttendanceStatus, { icon: typeof Check; color: string; activeColor: string }> = {
@@ -55,7 +55,7 @@ export default function AttendancePage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr();
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedShift, setSelectedShift] = useState<'Day' | 'Night'>('Day');
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
@@ -179,8 +179,8 @@ export default function AttendancePage() {
             attendance_date: selectedDate,
             shift: selectedShift,
             status: mark.status,
-            overtime: mark.overtime && mark.overtime > 0 ? mark.overtime : null,
-            deduction: mark.deduction && mark.deduction > 0 ? mark.deduction : null,
+            overtime: mark.overtime && mark.overtime > 0 ? Math.min(mark.overtime, 999) : 0,
+            deduction: mark.deduction && mark.deduction > 0 ? mark.deduction : 0,
             leave_type: mark.status === 'Leave' ? mark.leave_type : null,
             supervisor_id: user?.id ?? null,
           };

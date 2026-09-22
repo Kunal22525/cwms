@@ -42,6 +42,13 @@ export function formatDate(
   }).format(d);
 }
 
+export function localDateStr(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return '—';
   return formatDate(date, {

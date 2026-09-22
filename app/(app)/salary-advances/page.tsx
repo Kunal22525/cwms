@@ -65,7 +65,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { salaryAdvanceSchema, salaryPaymentSchema, type SalaryAdvanceFormValues, type SalaryPaymentFormValues } from '@/lib/validations';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, localDateStr } from '@/lib/utils';
 import type { SalaryAdvance, SalaryPayment, Worker, Site } from '@/types';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -114,7 +114,7 @@ export default function SalaryAdvancesPage() {
   const [form, setForm] = useState<SalaryAdvanceFormValues>({
     worker_id: '',
     amount: 0,
-    request_date: new Date().toISOString().split('T')[0],
+    request_date: localDateStr(),
     reason: '',
     remarks: '',
   });
@@ -123,7 +123,7 @@ export default function SalaryAdvancesPage() {
   const [paymentForm, setPaymentForm] = useState<SalaryPaymentFormValues>({
     worker_id: '',
     amount: 0,
-    payment_date: new Date().toISOString().split('T')[0],
+    payment_date: localDateStr(),
     payment_location: 'On Site',
     remarks: '',
   });
@@ -294,7 +294,7 @@ export default function SalaryAdvancesPage() {
     setForm({
       worker_id: '',
       amount: 0,
-      request_date: new Date().toISOString().split('T')[0],
+      request_date: localDateStr(),
       reason: '',
       remarks: '',
     });
@@ -307,7 +307,7 @@ export default function SalaryAdvancesPage() {
     setPaymentForm({
       worker_id: '',
       amount: 0,
-      payment_date: new Date().toISOString().split('T')[0],
+      payment_date: localDateStr(),
       payment_location: 'On Site',
       remarks: '',
     });

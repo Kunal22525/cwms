@@ -184,7 +184,7 @@ export default function WorkerDetailPage() {
         )}
         {role === 'admin' && (
           <Button asChild variant="outline">
-            <Link href="/workers">Edit Worker</Link>
+            <Link href="/workers">Back to Workers</Link>
           </Button>
         )}
       </PageHeader>
