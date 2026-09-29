@@ -15,6 +15,7 @@ import {
   MailCheck,
   ShieldCheck,
   ClipboardCheck,
+  Sparkles,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -344,6 +345,22 @@ export default function RegisterPage() {
               <Link href="/login" className="font-medium text-primary hover:underline">
                 Sign in
               </Link>
+            </p>
+
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <Button asChild variant="outline" size="lg" className="mt-4 w-full">
+              <a href="/api/demo/enter">
+                <Sparkles className="mr-2 h-4 w-4 text-warning" />
+                Try Demo View
+              </a>
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              Explore every section with sample data — nothing you do is saved.
             </p>
           </CardContent>
         </Card>

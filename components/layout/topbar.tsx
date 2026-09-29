@@ -1,8 +1,9 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
+import { LogOut, User as UserIcon, ChevronDown, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
+import { isDemoMode } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -22,11 +23,21 @@ export function TopBar() {
   const { user, profile, role, signOut } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const demoMode = isDemoMode();
 
   const handleSignOut = async () => {
     await signOut();
     toast({ title: 'Signed out', description: 'You have been signed out.' });
     router.replace('/login');
+  };
+
+  const handleExitDemo = async () => {
+    try {
+      await fetch('/api/demo/exit', { method: 'POST' });
+    } catch {
+      // still navigate away below
+    }
+    window.location.href = '/login';
   };
 
   const displayName = profile?.full_name || user?.email || 'User';
@@ -78,6 +89,18 @@ export function TopBar() {
             <UserIcon className="mr-2 h-4 w-4" />
             Settings
           </DropdownMenuItem>
+          {demoMode && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleExitDemo}
+                className="cursor-pointer text-warning"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                Exit demo view
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={handleSignOut}

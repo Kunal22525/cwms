@@ -35,6 +35,21 @@ const isApproversOnly = (pathname: string) =>
   );
 
 export async function updateSession(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Demo mode: skip all DB-backed auth checks. A demo visitor may browse every
+  // protected route, and is pushed back to the dashboard instead of login.
+  const isDemo = request.cookies.get('cwms_demo')?.value === '1';
+  if (isDemo) {
+    if (pathname === '/login' || pathname === '/register') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -65,8 +80,6 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
 
   // Redirect authenticated users away from the login/register pages
   if (user && (pathname === '/login' || pathname === '/register')) {
