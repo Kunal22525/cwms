@@ -11,10 +11,9 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import type { SiteInchargeRequest } from '@/types';
+import type { SiteInchargeRequest, SupervisorRequest } from '@/types';
 
 function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -37,6 +36,64 @@ function FullScreenLoader() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
+function PendingAccessCard({
+  title,
+  description,
+  onSignOut,
+}: {
+  title: string;
+  description: string;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md border-border/60 shadow-2xl">
+        <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
+            <ClipboardCheck className="h-8 w-8 text-primary" />
+          </div>
+          <CardTitle className="text-xl">{title}</CardTitle>
+          <CardDescription className="text-sm text-muted-foreground">
+            {description}
+          </CardDescription>
+          <Button variant="outline" onClick={onSignOut}>
+            Sign out
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function RejectedAccessCard({
+  title,
+  description,
+  onSignOut,
+}: {
+  title: string;
+  description: string;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md border-border/60 shadow-2xl">
+        <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10 ring-1 ring-destructive/20">
+            <XCircle className="h-8 w-8 text-destructive" />
+          </div>
+          <CardTitle className="text-xl">{title}</CardTitle>
+          <CardDescription className="text-sm text-muted-foreground">
+            {description}
+          </CardDescription>
+          <Button variant="outline" onClick={onSignOut}>
+            Sign out
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -67,9 +124,58 @@ function SiteInchargeGate({ children }: { children: React.ReactNode }) {
     };
   }, [role]);
 
-  if (role !== 'site_incharge') {
-    return <AppShell>{children}</AppShell>;
+  if (loadingRequest) {
+    return <FullScreenLoader />;
   }
+
+  if (!request || request.status === 'Pending') {
+    return (
+      <PendingAccessCard
+        title="Approval pending"
+        description="Your site incharge registration is waiting for an admin or supervisor to approve it and assign you a site. You will be able to access the application once approved."
+        onSignOut={() => void signOut()}
+      />
+    );
+  }
+
+  if (request.status === 'Rejected') {
+    return (
+      <RejectedAccessCard
+        title="Registration rejected"
+        description="Your site incharge registration was not approved. Contact an admin or supervisor if you believe this is a mistake."
+        onSignOut={() => void signOut()}
+      />
+    );
+  }
+
+  return <AppShell>{children}</AppShell>;
+}
+
+function PendingRoleGate({ children }: { children: React.ReactNode }) {
+  const { role, signOut } = useAuth();
+  const [request, setRequest] = useState<SupervisorRequest | null>(null);
+  const [loadingRequest, setLoadingRequest] = useState(true);
+
+  useEffect(() => {
+    if (role !== null) return;
+    let mounted = true;
+    const load = async () => {
+      try {
+        const { data } = await supabase.rpc('list_supervisor_requests');
+        if (!mounted) return;
+        const list = (data ?? []) as SupervisorRequest[];
+        setRequest(list[0] ?? null);
+      } catch {
+        // keep current state
+      } finally {
+        if (mounted) setLoadingRequest(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [role]);
 
   if (loadingRequest) {
     return <FullScreenLoader />;
@@ -77,46 +183,21 @@ function SiteInchargeGate({ children }: { children: React.ReactNode }) {
 
   if (!request || request.status === 'Pending') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md border-border/60 shadow-2xl">
-          <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-              <ClipboardCheck className="h-8 w-8 text-primary" />
-            </div>
-            <CardTitle className="text-xl">Approval pending</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              Your site incharge registration is waiting for an admin or
-              supervisor to approve it and assign you a site. You will be able
-              to access the application once approved.
-            </CardDescription>
-            <Button variant="outline" onClick={() => void signOut()}>
-              Sign out
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <PendingAccessCard
+        title="Approval pending"
+        description="Your supervisor registration is waiting for an admin to approve it. You will be able to access the application once approved."
+        onSignOut={() => void signOut()}
+      />
     );
   }
 
   if (request.status === 'Rejected') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md border-border/60 shadow-2xl">
-          <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10 ring-1 ring-destructive/20">
-              <XCircle className="h-8 w-8 text-destructive" />
-            </div>
-            <CardTitle className="text-xl">Registration rejected</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              Your site incharge registration was not approved. Contact an admin
-              or supervisor if you believe this is a mistake.
-            </CardDescription>
-            <Button variant="outline" onClick={() => void signOut()}>
-              Sign out
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <RejectedAccessCard
+        title="Registration rejected"
+        description="Your supervisor registration was not approved. Contact an admin if you believe this is a mistake."
+        onSignOut={() => void signOut()}
+      />
     );
   }
 
@@ -134,5 +215,19 @@ export default function DashboardLayout({
     return <FullScreenLoader />;
   }
 
-  return <SiteInchargeGate>{children}</SiteInchargeGate>;
+  return <AccessGate>{children}</AccessGate>;
+}
+
+function AccessGate({ children }: { children: React.ReactNode }) {
+  const { role } = useAuth();
+
+  if (role === 'site_incharge') {
+    return <SiteInchargeGate>{children}</SiteInchargeGate>;
+  }
+
+  if (role === null) {
+    return <PendingRoleGate>{children}</PendingRoleGate>;
+  }
+
+  return <AppShell>{children}</AppShell>;
 }

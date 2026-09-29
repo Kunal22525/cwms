@@ -48,7 +48,11 @@ export async function POST(request: NextRequest) {
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name, registration_role: role },
+      user_metadata: {
+        full_name,
+        registration_role: role,
+        admin_invite: true,
+      },
     });
 
   if (authError) {
@@ -140,6 +144,20 @@ export async function PATCH(request: NextRequest) {
     if (requestError) {
       return NextResponse.json({ error: requestError.message }, { status: 500 });
     }
+
+    // A user promoted to site incharge no longer has an active supervisor request.
+    const { error: supRequestError } = await admin
+      .from('supervisor_requests')
+      .update({
+        status: 'Rejected',
+        decided_by: auth.user?.id ?? null,
+        decided_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .in('status', ['Pending', 'Approved']);
+    if (supRequestError) {
+      return NextResponse.json({ error: supRequestError.message }, { status: 500 });
+    }
   } else {
     // Any pending/approved site incharge request is cancelled.
     const { data: row } = await admin
@@ -158,6 +176,36 @@ export async function PATCH(request: NextRequest) {
         .eq('id', row.id);
     }
     await admin.from('sites').update({ site_incharge_id: null }).eq('site_incharge_id', userId);
+
+    // Keep the supervisor request consistent with the assigned role: a user
+    // given the supervisor role is pre-approved; anyone else's request is cancelled.
+    if (role === 'supervisor') {
+      const { error: supApproveError } = await admin
+        .from('supervisor_requests')
+        .update({
+          status: 'Approved',
+          decided_by: auth.user?.id ?? null,
+          decided_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('status', 'Pending');
+      if (supApproveError) {
+        return NextResponse.json({ error: supApproveError.message }, { status: 500 });
+      }
+    } else {
+      const { error: supRejectError } = await admin
+        .from('supervisor_requests')
+        .update({
+          status: 'Rejected',
+          decided_by: auth.user?.id ?? null,
+          decided_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .in('status', ['Pending', 'Approved']);
+      if (supRejectError) {
+        return NextResponse.json({ error: supRejectError.message }, { status: 500 });
+      }
+    }
   }
 
   return NextResponse.json({ id: userId, role }, { status: 200 });

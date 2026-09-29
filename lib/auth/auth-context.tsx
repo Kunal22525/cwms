@@ -42,7 +42,9 @@ async function fetchProfileAndRole(
 
   // The user_roles table is RLS-locked to admins only, so role is determined
   // via the SECURITY DEFINER has_role() function. Precedence: admin >
-  // site_incharge > supervisor.
+  // site_incharge > supervisor. A signed-in user with no role (e.g. a
+  // self-registered supervisor whose account is still pending admin approval)
+  // resolves to null so they are gated out of the application.
   const { data: isAdmin } = await supabase.rpc('has_role', { p_role: 'admin' });
   if (isAdmin) {
     role = 'admin';
@@ -50,7 +52,14 @@ async function fetchProfileAndRole(
     const { data: isSiteIncharge } = await supabase.rpc('has_role', {
       p_role: 'site_incharge',
     });
-    role = isSiteIncharge ? 'site_incharge' : 'supervisor';
+    if (isSiteIncharge) {
+      role = 'site_incharge';
+    } else {
+      const { data: isSupervisor } = await supabase.rpc('has_role', {
+        p_role: 'supervisor',
+      });
+      role = isSupervisor ? 'supervisor' : null;
+    }
   }
 
   return { profile, role };

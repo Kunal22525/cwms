@@ -157,6 +157,19 @@ export interface SiteInchargeRequest {
   site_name?: string | null;
 }
 
+export interface SupervisorRequest {
+  id: string;
+  user_id: string;
+  status: SiteInchargeRequestStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+  full_name?: string;
+  email?: string;
+}
+
 export type WorkerChangeRequestType = 'add' | 'delete';
 
 export interface WorkerChangeRequest {

@@ -42,14 +42,14 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [checkEmail, setCheckEmail] = useState(false);
-  const [pendingIncharge, setPendingIncharge] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
   const [role, setRole] = useState<'supervisor' | 'site_incharge'>('supervisor');
 
   useEffect(() => {
-    if (!loading && user && !pendingIncharge) {
+    if (!loading && user && !pendingApproval) {
       router.replace('/dashboard');
     }
-  }, [user, loading, router, pendingIncharge]);
+  }, [user, loading, router, pendingApproval]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,9 +94,9 @@ export default function RegisterPage() {
         return;
       }
 
-      if (role === 'site_incharge') {
-        // Site incharge accounts need admin/supervisor approval before use.
-        setPendingIncharge(true);
+      if (role === 'site_incharge' || role === 'supervisor') {
+        // Both roles require admin approval before the account is usable.
+        setPendingApproval(true);
         setSubmitting(false);
         return;
       }
@@ -117,8 +117,8 @@ export default function RegisterPage() {
     );
   }
 
-  if (pendingIncharge || checkEmail) {
-    const isIncharge = pendingIncharge || role === 'site_incharge';
+  if (pendingApproval || checkEmail) {
+    const isIncharge = role === 'site_incharge';
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
         <div className="pointer-events-none absolute inset-0">
@@ -128,20 +128,28 @@ export default function RegisterPage() {
         <Card className="relative w-full max-w-md border-border/60 shadow-2xl">
           <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-              {pendingIncharge ? (
+              {pendingApproval ? (
                 <ClipboardCheck className="h-8 w-8 text-primary" />
               ) : (
                 <MailCheck className="h-8 w-8 text-primary" />
               )}
             </div>
-            {pendingIncharge ? (
+            {pendingApproval ? (
               <>
                 <CardTitle className="text-xl">Request submitted</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Your site incharge registration is <span className="font-medium text-foreground">pending approval</span>.
-                  An admin or supervisor must approve your request and assign you a
-                  site before you can access the application.
-                </p>
+                {isIncharge ? (
+                  <p className="text-sm text-muted-foreground">
+                    Your site incharge registration is <span className="font-medium text-foreground">pending approval</span>.
+                    An admin or supervisor must approve your request and assign you a
+                    site before you can access the application.
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Your supervisor registration is <span className="font-medium text-foreground">pending approval</span>.
+                    An admin must approve your request before you can access the
+                    application.
+                  </p>
+                )}
                 <Button variant="outline" onClick={() => router.replace('/login')}>
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back to sign in
@@ -155,7 +163,8 @@ export default function RegisterPage() {
                   {isIncharge
                     ? ' Once you confirm, an admin or supervisor will approve your '
                       + 'site incharge request and assign you a site.'
-                    : ' Click it to activate your account, then sign in.'}
+                    : ' Once you confirm, an admin will approve your supervisor '
+                      + 'registration before you can sign in.'}
                 </p>
                 <Button variant="outline" onClick={() => router.replace('/login')}>
                   <ArrowLeft className="mr-2 h-4 w-4" />
@@ -251,10 +260,14 @@ export default function RegisterPage() {
                     </span>
                   </button>
                 </div>
-                {role === 'site_incharge' && (
+                {role === 'site_incharge' ? (
                   <p className="text-xs text-muted-foreground">
                     Site incharge registrations require admin/supervisor approval
                     and a site assignment before you can sign in.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Supervisor registrations require admin approval before you can sign in.
                   </p>
                 )}
               </div>

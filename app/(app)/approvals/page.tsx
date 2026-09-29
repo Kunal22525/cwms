@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Loader2, Trash2, UserPlus } from 'lucide-react';
+import { BadgeCheck, Loader2, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { PageHeader } from '@/components/layout/page-header';
@@ -46,7 +46,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime } from '@/lib/utils';
-import type { Site, SiteInchargeRequest, WorkerChangeRequest } from '@/types';
+import type {
+  Site,
+  SiteInchargeRequest,
+  SupervisorRequest,
+  WorkerChangeRequest,
+} from '@/types';
 
 type DecideAction = 'approve' | 'reject';
 
@@ -72,6 +77,17 @@ async function decideWorkerChange(requestId: string, action: DecideAction) {
   return data;
 }
 
+async function decideSupervisor(requestId: string, action: DecideAction) {
+  const res = await fetch('/api/supervisor-requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, action }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
 export default function ApprovalsPage() {
   const { role } = useAuth();
   const { toast } = useToast();
@@ -84,6 +100,7 @@ export default function ApprovalsPage() {
     request: WorkerChangeRequest;
     action: DecideAction;
   } | null>(null);
+  const [supervisorRequestToReject, setSupervisorRequestToReject] = useState<SupervisorRequest | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const { data: siteRequests, isLoading: siteLoading } = useQuery({
@@ -101,6 +118,15 @@ export default function ApprovalsPage() {
       const { data, error } = await supabase.rpc('list_worker_change_requests');
       if (error) throw error;
       return (data as WorkerChangeRequest[]) ?? [];
+    },
+  });
+
+  const { data: supervisorRequests, isLoading: supervisorLoading } = useQuery({
+    queryKey: ['supervisor-requests'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('list_supervisor_requests');
+      if (error) throw error;
+      return (data as SupervisorRequest[]) ?? [];
     },
   });
 
@@ -190,6 +216,36 @@ export default function ApprovalsPage() {
     }
   };
 
+  const approveSupervisor = async (requestId: string) => {
+    setPendingId(`sp-${requestId}`);
+    try {
+      await decideSupervisor(requestId, 'approve');
+      toast({ title: 'Request approved', description: 'The supervisor account is now active.' });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-requests'] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Request failed';
+      toast({ variant: 'destructive', title: 'Approval failed', description: message });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const confirmRejectSupervisor = async () => {
+    if (!supervisorRequestToReject) return;
+    setPendingId(`sp-${supervisorRequestToReject.id}`);
+    try {
+      await decideSupervisor(supervisorRequestToReject.id, 'reject');
+      toast({ title: 'Request rejected', description: 'The supervisor registration was rejected.' });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-requests'] });
+      setSupervisorRequestToReject(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Request failed';
+      toast({ variant: 'destructive', title: 'Update failed', description: message });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const renderWorkerName = (r: WorkerChangeRequest) => {
     if (r.worker_name) return r.worker_name;
     const payloadName = (r.payload as { name?: string } | null)?.name;
@@ -200,8 +256,90 @@ export default function ApprovalsPage() {
     <div>
       <PageHeader
         title="Approvals"
-        description="Review and decide site incharge registrations and worker change requests"
+        description="Review and decide supervisor/site incharge registrations and worker change requests"
       />
+
+      {/* Supervisor Registrations (admin only) */}
+      {role === 'admin' && (
+        <div className="mb-8 rounded-lg border border-border/60">
+          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Supervisor Registrations</h2>
+          </div>
+          <div className="overflow-x-auto">
+            {supervisorLoading ? (
+              <div className="space-y-2 p-4">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : !supervisorRequests?.length ? (
+              <EmptyState
+                icon={ShieldCheck}
+                title="No registrations"
+                description="New supervisor registrations will appear here for admin approval."
+              />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="hidden md:table-cell">Email</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="hidden lg:table-cell">Requested</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {supervisorRequests!.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell className="font-medium">{req.full_name ?? '—'}</TableCell>
+                      <TableCell className="hidden md:table-cell text-muted-foreground">{req.email ?? '—'}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={req.status} />
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell text-muted-foreground">
+                        {formatDate(req.created_at)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {req.status === 'Pending' ? (
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={pendingId === `sp-${req.id}`}
+                              onClick={() => setSupervisorRequestToReject(req)}
+                            >
+                              Reject
+                            </Button>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              disabled={pendingId === `sp-${req.id}`}
+                              onClick={() => void approveSupervisor(req.id)}
+                            >
+                              {pendingId === `sp-${req.id}` ? (
+                                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                              ) : (
+                                <BadgeCheck className="mr-1 h-4 w-4" />
+                              )}
+                              Approve
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {formatDateTime(req.decided_at)}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Site Incharge Registrations */}
       <div className="mb-8 rounded-lg border border-border/60">
@@ -437,6 +575,35 @@ export default function ApprovalsPage() {
             <AlertDialogAction
               onClick={confirmRejectSite}
               disabled={pendingId === siteRequestToReject?.id}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              Reject
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Supervisor Request Reject Confirmation */}
+      <AlertDialog
+        open={!!supervisorRequestToReject}
+        onOpenChange={(open) => !open && setSupervisorRequestToReject(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reject registration?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {supervisorRequestToReject?.full_name}&apos;s supervisor registration
+              ({supervisorRequestToReject?.email}) will be rejected and they will
+              not be able to access the application.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pendingId === `sp-${supervisorRequestToReject?.id}`}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRejectSupervisor}
+              disabled={pendingId === `sp-${supervisorRequestToReject?.id}`}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
               Reject
