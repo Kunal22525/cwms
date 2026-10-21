@@ -278,10 +278,22 @@ export async function POST(request: NextRequest) {
     subtitle: string,
     lastCol: number
   ) => {
-    ws.getRow(1).height = logoImageId != null ? 58 : 30;
+    const headerHeight = logoImageId != null ? 64 : 30;
+    ws.getRow(1).height = headerHeight;
+
+    if (logoImageId != null) {
+      ws.getCell(1, 1).value = '';
+      ws.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+      ws.mergeCells(1, 1, 2, 1);
+      ws.getCell(2, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+      try {
+        ws.addImage(logoImageId, { tl: { col: 0, row: 0 }, ext: { width: 180, height: 60 } });
+      } catch {
+        // ignore image placement errors
+      }
+    }
+
     const nameCell = ws.getCell(1, 2);
-    ws.getRow(1).height = 58;
-    ws.getCell(1, 1).value = '';
     ws.mergeCells(1, 2, 1, lastCol);
     nameCell.value = COMPANY_NAME;
     nameCell.font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
@@ -303,6 +315,9 @@ export async function POST(request: NextRequest) {
     const tagCell = ws.getCell(2, 2);
     tagCell.value = contact.length ? contact.join('  |  ') : company.tagline ?? '';
     tagCell.font = { size: 9, color: { argb: 'FF6B7A8D' } };
+    for (let c = 2; c <= lastCol; c++) {
+      ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF14263B' } };
+    }
 
     ws.getRow(3).height = 22;
     ws.mergeCells(3, 1, 3, lastCol);
@@ -316,14 +331,6 @@ export async function POST(request: NextRequest) {
     ws.getCell(4, 1).value = subtitle;
     ws.getCell(4, 1).font = { size: 9, italic: true, color: { argb: 'FF6B7A8D' } };
     ws.getCell(4, 1).alignment = { horizontal: 'center' };
-
-    if (logoImageId != null) {
-      try {
-        ws.addImage(logoImageId, { tl: { col: 0, row: 0 }, ext: { width: 150, height: 50 } });
-      } catch {
-        // ignore image placement errors
-      }
-    }
   };
 
   // ============ SALARY SHEET (main workbook) ============
@@ -672,55 +679,102 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // ============ MONTHLY ATTENDANCE ============
+  // ============ MONTHLY ATTENDANCE (Pivot: Worker x Day) ============
   if (type === 'monthly-attendance') {
-    const lastCol = 10;
+    const daysInMon = daysInMonth(effMonth);
+    const dayCols = daysInMon;
+    const totalCols = 2 + dayCols;
     const ms = wb.addWorksheet('Monthly Attendance');
-    ms.views = [{ state: 'frozen', ySplit: 7 }];
-    setWidths(ms, [14, 12, 24, 18, 22, 10, 12, 12, 10, 14]);
-    const headers = ['Date', 'Worker Code', 'Worker Name', 'Role', 'Site', 'Shift', 'Status', 'Leave Type', 'OT (hrs)', 'Deduction (₹)'];
-    addHeader(ms, 'Monthly Attendance Report', `Month: ${monthLabel(effMonth)}  •  Site: ${siteId === 'all' ? 'All' : 'Selected'}  •  Generated: ${genDate}`, headers.length);
-    for (let c = 1; c <= headers.length; c++) ms.getRow(6).getCell(c).value = headers[c - 1];
-    styleHeaderRow(ms, 6, headers.length);
+    ms.views = [{ state: 'frozen', ySplit: 7, xSplit: 2 }];
+    const colWidths = [10, 22];
+    for (let d = 1; d <= dayCols; d++) colWidths.push(4.5);
+    setWidths(ms, colWidths);
+
+    addHeader(ms, 'Monthly Attendance Register', `Month: ${monthLabel(effMonth)}  •  Site: ${siteId === 'all' ? 'All' : 'Selected'}  •  Generated: ${genDate}`, totalCols);
+
+    const headerRow = [
+      'Worker Code', 'Worker Name',
+      ...Array.from({ length: dayCols }, (_, i) => String(i + 1))
+    ];
+    for (let c = 1; c <= totalCols; c++) {
+      ms.getRow(6).getCell(c).value = headerRow[c - 1];
+    }
+    styleHeaderRow(ms, 6, totalCols);
+    ms.getRow(6).eachCell((cell) => {
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+
     const wm2 = new Map(workers.map((w) => [w.id, w]));
     const siteMap2 = new Map(workers.map((w) => [w.id, w.site_name]));
+
+    const attByWorkerDate: Record<string, Record<string, { status: string; leave_type: string | null }>> = {};
+    for (const r of attRows) {
+      const key = r.worker_id;
+      const dateKey = r.attendance_date.split('-')[2];
+      if (!attByWorkerDate[key]) attByWorkerDate[key] = {};
+      attByWorkerDate[key][dateKey] = { status: r.status, leave_type: r.leave_type };
+    }
+
+    const regularWorkers = workers.filter((w) => !w.is_temporary);
     let mrr = 7;
-    let mP = 0, mA = 0, mH = 0, mPl = 0, mUl = 0, mOt = 0, mDed = 0;
-    const sorted2 = [...attRows].sort((a, b) => a.attendance_date.localeCompare(b.attendance_date));
-    for (const r of sorted2) {
-      const w = wm2.get(r.worker_id);
-      if (r.status === 'Present') mP++;
-      else if (r.status === 'Absent') mA++;
-      else if (r.status === 'Half Day') mH++;
-      else if (r.status === 'Leave') { if (r.leave_type === 'Paid') mPl++; else mUl++; }
-      mOt += safe(r.overtime);
-      mDed += safe(r.deduction);
-      const row = [
-        r.attendance_date, w?.worker_code ?? '', w?.name ?? '', w?.trade ?? '', w?.site_name ?? siteMap2.get(r.worker_id) ?? '—',
-        r.shift, r.status, r.leave_type ?? '', safe(r.overtime), safe(r.deduction),
-      ];
+    for (const w of regularWorkers) {
+      const workerAtt = attByWorkerDate[w.id] ?? {};
+      const row: (string | number)[] = [w.worker_code, w.name];
+      for (let d = 1; d <= dayCols; d++) {
+        const dayKey = String(d).padStart(2, '0');
+        const a = workerAtt[dayKey];
+        let cellVal = '';
+        if (a) {
+          switch (a.status) {
+            case 'Present': cellVal = 'P'; break;
+            case 'Absent': cellVal = 'A'; break;
+            case 'Half Day': cellVal = 'H'; break;
+            case 'Leave':
+              cellVal = a.leave_type === 'Paid' ? 'PL' : 'UL';
+              break;
+            default: cellVal = a.status?.charAt(0).toUpperCase() ?? '';
+          }
+        }
+        row.push(cellVal);
+      }
       row.forEach((v, i) => {
         const cell = ms.getRow(mrr).getCell(i + 1);
         cell.value = v;
         styleDataCell(cell);
-        if (i >= 8) cell.numFmt = i === 8 ? '0.0' : '#,##0.00';
+        if (i >= 2) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          const status = String(v).toUpperCase();
+          if (status === 'P') cell.font = { color: { argb: 'FF1B8A4A' }, bold: true };
+          else if (status === 'A') cell.font = { color: { argb: 'FFC0392B' }, bold: true };
+          else if (status === 'H') cell.font = { color: { argb: 'FFF39C12' }, bold: true };
+          else if (status === 'PL' || status === 'UL') cell.font = { color: { argb: 'FF2980B9' }, bold: true };
+        }
       });
       ms.getRow(mrr).height = 18;
       mrr++;
     }
-    const summaryLine1 = ['TOTALS', '', '', '', '', '', `Present: ${mP}`, `Absent: ${mA}`, `Half Day: ${mH}`, `Paid Leave: ${mPl}`];
-    const summaryLine2 = ['', '', '', '', '', '', `Unpaid Leave: ${mUl}`, `OT (hrs): ${money(mOt)}`, `Deductions (₹): ${money(mDed)}`, ''];
-    summaryLine1.forEach((v, i) => {
+
+    const summaryHeaders = ['TOTALS', '', ...Array(dayCols).fill('')];
+    summaryHeaders.forEach((v, i) => {
       const cell = ms.getRow(mrr).getCell(i + 1);
       cell.value = v; cell.font = { bold: true };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
       cell.border = { top: BORDER_H, bottom: BORDER_H, left: BORDER, right: BORDER };
     });
-    summaryLine2.forEach((v, i) => {
-      const cell = ms.getRow(mrr + 1).getCell(i + 1);
-      cell.value = v; cell.font = { bold: true };
-      cell.border = { top: BORDER_H, bottom: BORDER_H, left: BORDER, right: BORDER };
+    ms.getRow(mrr).height = 20;
+
+    const legendRow = mrr + 2;
+    const legend = [
+      'Legend: P = Present', 'A = Absent', 'H = Half Day',
+      'PL = Paid Leave', 'UL = Unpaid Leave'
+    ];
+    legend.forEach((text, idx) => {
+      const cell = ms.getCell(legendRow + idx, 1);
+      cell.value = text;
+      cell.font = { size: 9, italic: true, color: { argb: 'FF6B7A8D' } };
+      ms.mergeCells(legendRow + idx, 1, legendRow + idx, 3);
     });
+
     const fileName = `monthly-attendance-${month}.xlsx`;
     const buf = await wb.xlsx.writeBuffer();
     return new NextResponse(buf as unknown as BodyInit, {
