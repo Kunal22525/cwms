@@ -679,33 +679,34 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // ============ MONTHLY ATTENDANCE (Pivot: Worker x Day) ============
+  // ============ MONTHLY ATTENDANCE (Register: Worker x Day) ============
   if (type === 'monthly-attendance') {
     const daysInMon = daysInMonth(effMonth);
     const dayCols = daysInMon;
     const totalCols = 2 + dayCols;
     const ms = wb.addWorksheet('Monthly Attendance');
     ms.views = [{ state: 'frozen', ySplit: 7, xSplit: 2 }];
-    const colWidths = [10, 22];
-    for (let d = 1; d <= dayCols; d++) colWidths.push(4.5);
+    const colWidths = [12, 28];
+    for (let d = 1; d <= dayCols; d++) colWidths.push(4.2);
     setWidths(ms, colWidths);
 
-    addHeader(ms, 'Monthly Attendance Register', `Month: ${monthLabel(effMonth)}  •  Site: ${siteId === 'all' ? 'All' : 'Selected'}  •  Generated: ${genDate}`, totalCols);
+    addHeader(ms, 'MONTHLY ATTENDANCE REGISTER', `Month: ${monthLabel(effMonth).toUpperCase()}  •  Site: ${siteId === 'all' ? 'ALL SITES' : 'SELECTED SITE'}  •  Generated: ${genDate}`, totalCols);
 
     const headerRow = [
-      'Worker Code', 'Worker Name',
+      'WORKER CODE', 'WORKER NAME',
       ...Array.from({ length: dayCols }, (_, i) => String(i + 1))
     ];
     for (let c = 1; c <= totalCols; c++) {
-      ms.getRow(6).getCell(c).value = headerRow[c - 1];
+      const cell = ms.getRow(6).getCell(c);
+      cell.value = headerRow[c - 1];
     }
     styleHeaderRow(ms, 6, totalCols);
     ms.getRow(6).eachCell((cell) => {
       cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     });
 
     const wm2 = new Map(workers.map((w) => [w.id, w]));
-    const siteMap2 = new Map(workers.map((w) => [w.id, w.site_name]));
 
     const attByWorkerDate: Record<string, Record<string, { status: string; leave_type: string | null }>> = {};
     for (const r of attRows) {
@@ -715,11 +716,22 @@ export async function POST(request: NextRequest) {
       attByWorkerDate[key][dateKey] = { status: r.status, leave_type: r.leave_type };
     }
 
-    const regularWorkers = workers.filter((w) => !w.is_temporary);
+    const registerWorkers = workers.filter((w) => !w.is_temporary && w.worker_code);
     let mrr = 7;
-    for (const w of regularWorkers) {
+    for (const w of registerWorkers) {
       const workerAtt = attByWorkerDate[w.id] ?? {};
-      const row: (string | number)[] = [w.worker_code, w.name];
+      const codeCell = ms.getRow(mrr).getCell(1);
+      codeCell.value = w.worker_code;
+      styleDataCell(codeCell, false);
+      codeCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      codeCell.font = { size: 9 };
+
+      const nameCell = ms.getRow(mrr).getCell(2);
+      nameCell.value = w.name;
+      styleDataCell(nameCell, false);
+      nameCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      nameCell.font = { size: 9 };
+
       for (let d = 1; d <= dayCols; d++) {
         const dayKey = String(d).padStart(2, '0');
         const a = workerAtt[dayKey];
@@ -735,40 +747,40 @@ export async function POST(request: NextRequest) {
             default: cellVal = a.status?.charAt(0).toUpperCase() ?? '';
           }
         }
-        row.push(cellVal);
+        const cell = ms.getRow(mrr).getCell(2 + d);
+        cell.value = cellVal;
+        styleDataCell(cell, false);
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (cellVal === 'P') cell.font = { color: { argb: 'FF1B8A4A' }, bold: true, size: 9 };
+        else if (cellVal === 'A') cell.font = { color: { argb: 'FFC0392B' }, bold: true, size: 9 };
+        else if (cellVal === 'H') cell.font = { color: { argb: 'FFF39C12' }, bold: true, size: 9 };
+        else if (cellVal === 'PL' || cellVal === 'UL') cell.font = { color: { argb: 'FF2980B9' }, bold: true, size: 9 };
+        else cell.font = { size: 9 };
       }
-      row.forEach((v, i) => {
-        const cell = ms.getRow(mrr).getCell(i + 1);
-        cell.value = v;
-        styleDataCell(cell);
-        if (i >= 2) {
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-          const status = String(v).toUpperCase();
-          if (status === 'P') cell.font = { color: { argb: 'FF1B8A4A' }, bold: true };
-          else if (status === 'A') cell.font = { color: { argb: 'FFC0392B' }, bold: true };
-          else if (status === 'H') cell.font = { color: { argb: 'FFF39C12' }, bold: true };
-          else if (status === 'PL' || status === 'UL') cell.font = { color: { argb: 'FF2980B9' }, bold: true };
-        }
-      });
       ms.getRow(mrr).height = 18;
       mrr++;
     }
 
-    const summaryHeaders = ['TOTALS', '', ...Array(dayCols).fill('')];
-    summaryHeaders.forEach((v, i) => {
-      const cell = ms.getRow(mrr).getCell(i + 1);
-      cell.value = v; cell.font = { bold: true };
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = ms.getRow(mrr).getCell(c);
+      if (c === 1) cell.value = 'TOTAL';
+      else if (c === 2) cell.value = '';
+      else cell.value = '';
+      cell.font = { bold: true };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
       cell.border = { top: BORDER_H, bottom: BORDER_H, left: BORDER, right: BORDER };
-    });
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
     ms.getRow(mrr).height = 20;
 
+    ms.pageSetup.orientation = 'landscape';
+    ms.pageSetup.fitToPage = true;
+    ms.pageSetup.fitToWidth = 1;
+    ms.pageSetup.fitToHeight = 0;
+    ms.pageSetup.margins = { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 };
+
     const legendRow = mrr + 2;
-    const legend = [
-      'Legend: P = Present', 'A = Absent', 'H = Half Day',
-      'PL = Paid Leave', 'UL = Unpaid Leave'
-    ];
-    legend.forEach((text, idx) => {
+    ['P = Present', 'A = Absent', 'H = Half Day', 'PL = Paid Leave', 'UL = Unpaid Leave'].forEach((text, idx) => {
       const cell = ms.getCell(legendRow + idx, 1);
       cell.value = text;
       cell.font = { size: 9, italic: true, color: { argb: 'FF6B7A8D' } };
