@@ -905,13 +905,15 @@ export default function WorkersPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="daily_wage">Daily Wage (₹)</Label>
+                <Label htmlFor="daily_wage">Monthly Salary (₹)</Label>
                 <Input
                   id="daily_wage"
                   type="number"
                   value={form.daily_wage ?? ''}
                   onChange={(e) => setForm({ ...form, daily_wage: e.target.value ? Number(e.target.value) : null })}
+                  placeholder="e.g. 30000"
                 />
+                <p className="text-xs text-muted-foreground">Per day = Monthly / days in selected month</p>
                 {errors.daily_wage && <p className="text-xs text-destructive">{errors.daily_wage}</p>}
               </div>
               <div className="space-y-2">
