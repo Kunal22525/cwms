@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { ClipboardCheck, Loader2, XCircle } from 'lucide-react';
@@ -13,7 +13,7 @@ import {
   CardDescription,
   CardTitle,
 } from '@/components/ui/card';
-import type { SiteInchargeRequest, SupervisorRequest } from '@/types';
+import type { SiteInchargeRequest } from '@/types';
 
 function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -132,7 +132,7 @@ function SiteInchargeGate({ children }: { children: React.ReactNode }) {
     return (
       <PendingAccessCard
         title="Approval pending"
-        description="Your site incharge registration is waiting for an admin or supervisor to approve it and assign you a site. You will be able to access the application once approved."
+        description="Your site incharge account is waiting for site assignment. Please contact an administrator."
         onSignOut={() => void signOut()}
       />
     );
@@ -141,8 +141,8 @@ function SiteInchargeGate({ children }: { children: React.ReactNode }) {
   if (request.status === 'Rejected') {
     return (
       <RejectedAccessCard
-        title="Registration rejected"
-        description="Your site incharge registration was not approved. Contact an admin or supervisor if you believe this is a mistake."
+        title="Access denied"
+        description="Your site incharge access is not active. Contact an administrator if you believe this is a mistake."
         onSignOut={() => void signOut()}
       />
     );
@@ -151,57 +151,15 @@ function SiteInchargeGate({ children }: { children: React.ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }
 
-function PendingRoleGate({ children }: { children: React.ReactNode }) {
-  const { role, signOut } = useAuth();
-  const [request, setRequest] = useState<SupervisorRequest | null>(null);
-  const [loadingRequest, setLoadingRequest] = useState(true);
-
-  useEffect(() => {
-    if (role !== null) return;
-    let mounted = true;
-    const load = async () => {
-      try {
-        const { data } = await supabase.rpc('list_supervisor_requests');
-        if (!mounted) return;
-        const list = (data ?? []) as SupervisorRequest[];
-        setRequest(list[0] ?? null);
-      } catch {
-        // keep current state
-      } finally {
-        if (mounted) setLoadingRequest(false);
-      }
-    };
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, [role]);
-
-  if (loadingRequest) {
-    return <FullScreenLoader />;
-  }
-
-  if (!request || request.status === 'Pending') {
-    return (
-      <PendingAccessCard
-        title="Approval pending"
-        description="Your supervisor registration is waiting for an admin to approve it. You will be able to access the application once approved."
-        onSignOut={() => void signOut()}
-      />
-    );
-  }
-
-  if (request.status === 'Rejected') {
-    return (
-      <RejectedAccessCard
-        title="Registration rejected"
-        description="Your supervisor registration was not approved. Contact an admin if you believe this is a mistake."
-        onSignOut={() => void signOut()}
-      />
-    );
-  }
-
-  return <AppShell>{children}</AppShell>;
+function PendingRoleGate() {
+  const { signOut } = useAuth();
+  return (
+    <PendingAccessCard
+      title="Access pending"
+      description="Your account does not have an assigned role yet. Please contact an administrator."
+      onSignOut={() => void signOut()}
+    />
+  );
 }
 
 export default function DashboardLayout({
@@ -226,7 +184,7 @@ function AccessGate({ children }: { children: React.ReactNode }) {
   }
 
   if (role === null) {
-    return <PendingRoleGate>{children}</PendingRoleGate>;
+    return <PendingRoleGate />;
   }
 
   return <AppShell>{children}</AppShell>;

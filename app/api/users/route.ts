@@ -26,14 +26,14 @@ export async function POST(request: NextRequest) {
   const auth = await assertAdmin(supabase);
   if (auth.error) return auth.error;
 
-  let body: { email?: string; password?: string; full_name?: string; mobile?: string; role?: string };
+  let body: { email?: string; password?: string; full_name?: string; mobile?: string; role?: string; site_id?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { email, password, full_name, mobile, role } = body;
+  const { email, password, full_name, mobile, role, site_id } = body;
 
   if (!email || !password || !full_name || !role) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -41,6 +41,10 @@ export async function POST(request: NextRequest) {
 
   if (!['admin', 'supervisor', 'site_incharge'].includes(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+  }
+
+  if (role === 'site_incharge' && !site_id) {
+    return NextResponse.json({ error: 'Site is required for site incharge' }, { status: 400 });
   }
 
   const { data: authData, error: authError } =
@@ -81,6 +85,40 @@ export async function POST(request: NextRequest) {
       .update({ role: 'admin' })
       .eq('user_id', userId)
       .eq('role', 'supervisor');
+  }
+
+  // Admin-created site incharge accounts are activated immediately and assigned to a site.
+  if (role === 'site_incharge' && site_id) {
+    const admin = getSupabaseAdmin();
+    const now = new Date().toISOString();
+
+    // Remove this user from any previously assigned site, then assign the selected site.
+    await admin.from('sites').update({ site_incharge_id: null }).eq('site_incharge_id', userId);
+    const { error: siteAssignError } = await admin
+      .from('sites')
+      .update({ site_incharge_id: userId })
+      .eq('id', site_id);
+    if (siteAssignError) {
+      return NextResponse.json({ error: siteAssignError.message }, { status: 500 });
+    }
+
+    // Approve/create the site incharge request so the account can access the app.
+    const { error: reqError } = await admin
+      .from('site_incharge_requests')
+      .upsert(
+        {
+          user_id: userId,
+          site_id,
+          status: 'Approved',
+          requested_by: auth.user?.id ?? userId,
+          decided_by: auth.user?.id ?? null,
+          decided_at: now,
+        },
+        { onConflict: 'user_id' }
+      );
+    if (reqError) {
+      return NextResponse.json({ error: reqError.message }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ id: userId, email, full_name, role }, { status: 201 });

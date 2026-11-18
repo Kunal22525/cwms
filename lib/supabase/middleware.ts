@@ -41,7 +41,7 @@ export async function updateSession(request: NextRequest) {
   // protected route, and is pushed back to the dashboard instead of login.
   const isDemo = request.cookies.get('cwms_demo')?.value === '1';
   if (isDemo) {
-    if (pathname === '/login' || pathname === '/register') {
+    if (pathname === '/login' || pathname === '/register' || pathname.startsWith('/auth') || pathname === '/confirm') {
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';
       url.search = '';
@@ -81,8 +81,16 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Redirect authenticated users away from the login/register pages
-  if (user && (pathname === '/login' || pathname === '/register')) {
+  // Redirect register/auth-confirm routes to login (self-registration removed)
+  if (pathname === '/register' || pathname.startsWith('/auth') || pathname === '/confirm') {
+    const url = request.nextUrl.clone();
+    url.pathname = user ? '/dashboard' : '/login';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect authenticated users away from the login page
+  if (user && pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     url.search = '';

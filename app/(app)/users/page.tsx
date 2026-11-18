@@ -78,6 +78,7 @@ export default function UsersPage() {
     full_name: '',
     mobile: '',
     role: 'supervisor',
+    site_id: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -106,6 +107,19 @@ export default function UsersPage() {
       }));
     },
     enabled: role === 'admin',
+  });
+
+  const { data: sites } = useQuery({
+    queryKey: ['users-sites'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sites')
+        .select('id, site_name, site_code')
+        .order('site_name');
+      if (error) throw error;
+      return (data as { id: string; site_name: string; site_code: string }[]) ?? [];
+    },
+    enabled: role === 'admin' && dialogOpen,
   });
 
   const filteredUsers = (users ?? []).filter(
@@ -144,11 +158,11 @@ export default function UsersPage() {
 
       toast({
         title: 'User created',
-        description: `${form.full_name} has been added as ${form.role}.`,
+        description: `${form.full_name} has been added as ${roleLabel(form.role as AppRole)}.`,
       });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setDialogOpen(false);
-      setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor' });
+      setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor', site_id: '' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       toast({ variant: 'destructive', title: 'Failed to create user', description: message });
@@ -232,7 +246,7 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader title="Users" description="Manage system users and their roles">
-        <Button onClick={() => { setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor' }); setErrors({}); setDialogOpen(true); }}>
+        <Button onClick={() => { setForm({ email: '', password: '', full_name: '', mobile: '', role: 'supervisor', site_id: '' }); setErrors({}); setDialogOpen(true); }}>
           <Plus className="mr-2 h-4 w-4" />
           Add User
         </Button>
@@ -344,7 +358,7 @@ export default function UsersPage() {
           <DialogHeader>
             <DialogTitle>Add New User</DialogTitle>
             <DialogDescription>
-              Create a new user account. The user will be able to sign in with these credentials.
+              Create a new user account with email and password. Share the credentials with the user so they can sign in.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleInvite} className="space-y-4">
@@ -391,7 +405,9 @@ export default function UsersPage() {
               <Label htmlFor="role">Role</Label>
               <Select
                 value={form.role}
-                onValueChange={(v) => setForm({ ...form, role: v as AppRole })}
+                onValueChange={(v) =>
+                  setForm({ ...form, role: v as AppRole, site_id: v === 'site_incharge' ? (form.site_id || '') : '' })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -402,13 +418,31 @@ export default function UsersPage() {
                   <SelectItem value="site_incharge">Site Incharge</SelectItem>
                 </SelectContent>
               </Select>
-              {form.role === 'site_incharge' && (
-                <p className="text-xs text-muted-foreground">
-                  Site incharge accounts require admin/supervisor approval and a
-                  site assignment on the Approvals page.
-                </p>
-              )}
             </div>
+            {form.role === 'site_incharge' && (
+              <div className="space-y-2">
+                <Label htmlFor="site_id">Assign Site</Label>
+                <Select
+                  value={form.site_id || ''}
+                  onValueChange={(v) => setForm({ ...form, site_id: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a site" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(sites ?? []).map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.site_name} ({s.site_code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.site_id && <p className="text-xs text-destructive">{errors.site_id}</p>}
+                <p className="text-xs text-muted-foreground">
+                  The site incharge account will be created and assigned to this site immediately.
+                </p>
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
                 Cancel

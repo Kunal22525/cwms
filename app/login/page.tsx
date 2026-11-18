@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+
 import { useRouter } from 'next/navigation';
 import { HardHat, Mail, Lock, Loader2, Eye, EyeOff, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -192,10 +192,7 @@ export default function LoginPage() {
             </form>
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
-              New here?{' '}
-              <Link href="/register" className="font-medium text-primary hover:underline">
-                Create an account
-              </Link>
+              Accounts are created by the administrator. Contact your admin for access.
             </p>
 
             <div className="mt-4 flex items-center gap-3">

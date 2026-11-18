@@ -130,6 +130,15 @@ export const inviteUserSchema = z.object({
   full_name: z.string().min(1, 'Full name is required'),
   mobile: z.string().optional(),
   role: z.enum(['admin', 'supervisor', 'site_incharge']),
+  site_id: z.string().uuid().optional().or(z.literal('')),
+}).superRefine((data, ctx) => {
+  if (data.role === 'site_incharge' && !data.site_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['site_id'],
+      message: 'Site is required for site incharge',
+    });
+  }
 });
 
 export type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
