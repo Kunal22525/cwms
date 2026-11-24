@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -71,6 +71,10 @@ export default function UsersPage() {
   const [roleChangeUser, setRoleChangeUser] = useState<{ profile: Profile; currentRole: AppRole } | null>(null);
   const [roleChangeTarget, setRoleChangeTarget] = useState<AppRole>('supervisor');
   const [deleteUser, setDeleteUser] = useState<Profile | null>(null);
+  const [editUser, setEditUser] = useState<UserWithRole | null>(null);
+  const [editForm, setEditForm] = useState({ full_name: '', mobile: '', email: '', newPassword: '', confirmPassword: '' });
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState(false);
 
   const [form, setForm] = useState<InviteUserFormValues>({
     email: '',
@@ -157,8 +161,11 @@ export default function UsersPage() {
       }
 
       toast({
-        title: 'User created',
-        description: `${form.full_name} has been added as ${roleLabel(form.role as AppRole)}.`,
+        title: data.emailSent ? 'User created' : 'User created, but email failed',
+        description: data.emailSent
+          ? `${form.full_name} has been added as ${roleLabel(form.role as AppRole)}. Credentials were emailed.`
+          : `${form.full_name} has been added, but credential email failed: ${data.emailError || 'Unknown error'}`,
+        variant: data.emailSent ? 'default' : 'destructive',
       });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setDialogOpen(false);
@@ -228,6 +235,64 @@ export default function UsersPage() {
       setSubmitting(false);
     }
     setRoleChangeUser(null);
+  };
+
+  const openEditUser = (u: UserWithRole) => {
+    setEditUser(u);
+    setEditForm({
+      full_name: u.full_name || '',
+      mobile: u.mobile || '',
+      email: u.email || '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setEditErrors({});
+  };
+
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editUser) return;
+    const fieldErrors: Record<string, string> = {};
+    if (!editForm.full_name.trim()) fieldErrors.full_name = 'Full name is required';
+    const emailChanged = editForm.email.trim() !== editUser.email;
+    const wantsPasswordChange = editForm.newPassword.length > 0 || editForm.confirmPassword.length > 0;
+    if (emailChanged && !editForm.email.trim()) fieldErrors.email = 'Email is required';
+    if (emailChanged && !editForm.newPassword) fieldErrors.newPassword = 'New password required when changing email';
+    if (wantsPasswordChange && editForm.newPassword.length < 6) fieldErrors.newPassword = 'Password must be at least 6 characters';
+    if (wantsPasswordChange && editForm.newPassword !== editForm.confirmPassword) fieldErrors.confirmPassword = 'Passwords do not match';
+    setEditErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) return;
+
+    setEditing(true);
+    try {
+      const payload: Record<string, string> = { userId: editUser.id };
+      if (editForm.full_name.trim() !== editUser.full_name) payload.full_name = editForm.full_name.trim();
+      if ((editForm.mobile.trim() || '') !== (editUser.mobile || '')) payload.mobile = editForm.mobile.trim();
+      if (emailChanged) payload.newEmail = editForm.email.trim();
+      if (editForm.newPassword) payload.newPassword = editForm.newPassword;
+
+      const res = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to update user');
+
+      const sentMsg = data.emailSent === true ? ' Credential email sent.' : data.emailSent === false ? ` Email failed: ${data.emailError || 'Unknown error'}` : '';
+      toast({
+        title: data.emailSent === false ? 'User updated, but email failed' : 'User updated',
+        description: `${editUser.full_name} updated.${sentMsg}`,
+        variant: data.emailSent === false ? 'destructive' : 'default',
+      });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setEditUser(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      toast({ variant: 'destructive', title: 'Update failed', description: message });
+    } finally {
+      setEditing(false);
+    }
   };
 
   if (role !== 'admin') {
@@ -301,7 +366,7 @@ export default function UsersPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{u.mobile ?? '—'}</TableCell>
+                  <TableCell className="hidden md:table-cell text-muted-foreground">{u.mobile ?? 'â€”'}</TableCell>
                   <TableCell>
                     <Badge
                       variant={
@@ -320,6 +385,9 @@ export default function UsersPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => openEditUser(u)}>
+                        Edit
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -491,6 +559,50 @@ export default function UsersPage() {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Change Role
             </Button>
+      {/* Edit User Dialog */}
+      <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>
+              Update user details. If you change email, you must set a new password and credentials will be emailed to the new email. If you change password, credentials will be emailed to the current email.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditUser} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_full_name">Full Name</Label>
+              <Input id="edit_full_name" value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} />
+              {editErrors.full_name && <p className="text-xs text-destructive">{editErrors.full_name}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_email">Email</Label>
+              <Input id="edit_email" type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+              {editErrors.email && <p className="text-xs text-destructive">{editErrors.email}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_mobile">Mobile</Label>
+              <Input id="edit_mobile" value={editForm.mobile} onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_password">New Password</Label>
+              <Input id="edit_password" type="password" value={editForm.newPassword} onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })} placeholder="Leave blank to keep unchanged" />
+              {editErrors.newPassword && <p className="text-xs text-destructive">{editErrors.newPassword}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_confirm_password">Confirm New Password</Label>
+              <Input id="edit_confirm_password" type="password" value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} />
+              {editErrors.confirmPassword && <p className="text-xs text-destructive">{editErrors.confirmPassword}</p>}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditUser(null)} disabled={editing}>Cancel</Button>
+              <Button type="submit" disabled={editing}>
+                {editing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -88,6 +88,7 @@ export default function SettingsPage() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (role !== 'admin') return;
     if (newPassword !== confirmPassword) {
       toast({ variant: 'destructive', title: 'Passwords do not match', description: 'New password and confirmation must match.' });
       return;
@@ -206,10 +207,12 @@ export default function SettingsPage() {
             <User className="h-3.5 w-3.5" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="password" className="gap-1.5">
-            <Lock className="h-3.5 w-3.5" />
-            Password
-          </TabsTrigger>
+          {role === 'admin' && (
+            <TabsTrigger value="password" className="gap-1.5">
+              <Lock className="h-3.5 w-3.5" />
+              Password
+            </TabsTrigger>
+          )}
           {role === 'admin' && (
             <TabsTrigger value="company" className="gap-1.5">
               <Building2 className="h-3.5 w-3.5" />
@@ -275,39 +278,41 @@ export default function SettingsPage() {
         </TabsContent>
 
         {/* Password Tab */}
-        <TabsContent value="password">
-          <Card className="max-w-lg border-border/60">
-            <CardHeader>
-              <CardTitle className="text-base">Change Password</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="newPassword">New Password</Label>
-                  <Input
-                    id="newPassword"
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                  <Input
-                    id="confirmPassword"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" disabled={savingPassword}>
-                  {savingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Change Password
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        {role === 'admin' && (
+          <TabsContent value="password">
+            <Card className="max-w-lg border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base">Change Password</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleChangePassword} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword">New Password</Label>
+                    <Input
+                      id="newPassword"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                    />
+                  </div>
+                  <Button type="submit" disabled={savingPassword}>
+                    {savingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Change Password
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* About Tab */}
         <TabsContent value="about">

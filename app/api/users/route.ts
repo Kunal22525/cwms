@@ -1,6 +1,7 @@
 ﻿import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase/service-role';
+import { sendCredentialEmail } from '@/lib/email';
 
 export const runtime = 'nodejs';
 
@@ -121,7 +122,27 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ id: userId, email, full_name, role }, { status: 201 });
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+  const emailResult = await sendCredentialEmail({
+    to: email,
+    fullName: full_name,
+    email,
+    password,
+    siteUrl: appUrl,
+    action: 'created',
+  });
+
+  return NextResponse.json(
+    {
+      id: userId,
+      email,
+      full_name,
+      role,
+      emailSent: emailResult.ok,
+      emailError: emailResult.ok ? null : emailResult.error,
+    },
+    { status: 201 }
+  );
 }
 
 export async function PATCH(request: NextRequest) {
@@ -129,16 +150,121 @@ export async function PATCH(request: NextRequest) {
   const auth = await assertAdmin(supabase);
   if (auth.error) return auth.error;
 
-  let body: { userId?: string; role?: string };
+  let body: {
+    userId?: string;
+    role?: string;
+    newEmail?: string;
+    newPassword?: string;
+    full_name?: string;
+    mobile?: string;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { userId, role } = body;
+  const { userId, role, newEmail, newPassword, full_name, mobile } = body;
 
-  if (!userId || !role || !['admin', 'supervisor', 'site_incharge'].includes(role)) {
+  if (!userId) {
+    return NextResponse.json({ error: 'Missing user id' }, { status: 400 });
+  }
+
+  const admin = getSupabaseAdmin();
+
+  // Credential update flow (admin-only): can update email/password/profile.
+  const wantsCredentialUpdate =
+    typeof newEmail === 'string' ||
+    typeof newPassword === 'string' ||
+    typeof full_name === 'string' ||
+    typeof mobile === 'string';
+
+  if (wantsCredentialUpdate) {
+    const { data: targetUser, error: targetError } = await admin.auth.admin.getUserById(userId);
+    if (targetError || !targetUser?.user) {
+      return NextResponse.json({ error: targetError?.message || 'User not found' }, { status: 404 });
+    }
+
+    const currentEmail = targetUser.user.email ?? '';
+    const emailChanged = typeof newEmail === 'string' && newEmail.trim() !== '' && newEmail.trim() !== currentEmail;
+
+    if (emailChanged && (!newPassword || newPassword.length < 6)) {
+      return NextResponse.json(
+        { error: 'New password is required (min 6 chars) when changing email' },
+        { status: 400 }
+      );
+    }
+
+    if (typeof newPassword === 'string' && newPassword.length > 0 && newPassword.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
+    }
+
+    const authUpdate: { email?: string; password?: string; email_confirm?: boolean; user_metadata?: Record<string, unknown> } = {};
+    if (emailChanged) {
+      authUpdate.email = newEmail!.trim();
+      authUpdate.email_confirm = true;
+    }
+    if (typeof newPassword === 'string' && newPassword.length > 0) {
+      authUpdate.password = newPassword;
+    }
+    if (typeof full_name === 'string' && full_name.trim()) {
+      authUpdate.user_metadata = {
+        ...(targetUser.user.user_metadata || {}),
+        full_name: full_name.trim(),
+      };
+    }
+
+    if (Object.keys(authUpdate).length > 0) {
+      const { error: updateAuthError } = await admin.auth.admin.updateUserById(userId, authUpdate);
+      if (updateAuthError) {
+        return NextResponse.json({ error: updateAuthError.message }, { status: 400 });
+      }
+    }
+
+    const profilePatch: Record<string, string | null> = {};
+    if (typeof full_name === 'string' && full_name.trim()) profilePatch.full_name = full_name.trim();
+    if (typeof mobile === 'string') profilePatch.mobile = mobile.trim() || null;
+    if (emailChanged) profilePatch.email = newEmail!.trim();
+    if (Object.keys(profilePatch).length > 0) {
+      const { error: profileError } = await admin.from('profiles').update(profilePatch).eq('id', userId);
+      if (profileError) {
+        return NextResponse.json({ error: profileError.message }, { status: 500 });
+      }
+    }
+
+    let emailSent: boolean | undefined;
+  let emailError: string | null | undefined;
+  if (typeof newPassword === 'string' && newPassword.length >= 6) {
+    const { data: profileRow } = await admin.from('profiles').select('full_name, email').eq('id', userId).maybeSingle();
+    const targetEmail = (emailChanged ? newEmail!.trim() : (profileRow?.email || currentEmail)) as string;
+    const targetName = (typeof full_name === 'string' && full_name.trim()) ? full_name.trim() : (profileRow?.full_name || targetEmail);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+    const emailResult = await sendCredentialEmail({
+      to: targetEmail,
+      fullName: targetName,
+      email: targetEmail,
+      password: newPassword,
+      siteUrl: appUrl,
+      action: emailChanged ? 'email_changed' : 'password_changed',
+    });
+    emailSent = emailResult.ok;
+    emailError = emailResult.ok ? null : emailResult.error;
+  }
+
+    // If no role change requested, return credential update result.
+    if (!role) {
+      return NextResponse.json(
+        {
+          id: userId,
+          updated: true,
+          ...(emailSent !== undefined ? { emailSent, emailError } : {}),
+        },
+        { status: 200 }
+      );
+    }
+  }
+
+  if (!role || !['admin', 'supervisor', 'site_incharge'].includes(role)) {
     return NextResponse.json({ error: 'Missing or invalid fields' }, { status: 400 });
   }
 
