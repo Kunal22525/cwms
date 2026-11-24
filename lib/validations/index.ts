@@ -35,7 +35,7 @@ export const workerSchema = z.object({
   trade: z.string().min(1, 'Trade is required'),
   daily_wage: z.coerce
     .number()
-    .min(0, 'Daily wage must be 0 or greater')
+    .min(0, 'Monthly salary must be 0 or greater')
     .optional()
     .nullable(),
   pf_percentage: z.coerce

@@ -405,13 +405,14 @@ export async function POST(request: NextRequest) {
         otH += safe(r.overtime);
         ded += safe(r.deduction);
       }
-      const wage = safe(w.daily_wage);
+            const daysInMon = daysInMonth(effMonth);
+      const monthlySalary = money(safe(w.daily_wage));
+      const perDay = daysInMon > 0 ? monthlySalary / daysInMon : 0;
       const pfPct = safe(w.pf_percentage) || 0;
       const daysPaid = present + half * 0.5 + paidLeave;
-      const gross = money(wage * daysPaid);
-      const otAmount = money((wage / 8) * otH);
+      const gross = money(perDay * daysPaid);
+      const otAmount = money((perDay / 8) * otH);
       const pf = money((gross * pfPct) / 100);
-      const monthlySalary = money(wage * 30);
       const totalSalary = money(Math.min(gross, monthlySalary) + otAmount);
       const netDue = money(totalSalary - pf - ded);
       const pay = payByWorker[w.id] ?? { onSite: 0, office: 0 };
@@ -419,7 +420,7 @@ export async function POST(request: NextRequest) {
       const paidOffice = money(pay.office);
       const totalDue = money(netDue - paidOnSite - paidOffice);
       const advanceBalance = money(advByWorker[w.id]?.amount ?? 0);
-      const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days × ₹${wage}/day = ₹${gross}`;
+      const calcText = `${Number.isInteger(daysPaid) ? daysPaid : daysPaid.toFixed(1)} days x Rs.${money(perDay)}/day = Rs.${gross}`;
       rows.push({ worker: w, present, half, paidLeave, unpaidLeave, absent, daysPaid, calcText, otHours: money(otH), otAmount, pf, deduction: ded, gross, monthlySalary, totalSalary, netDue, paidOnSite, paidOffice, totalDue, advanceBalance });
       presentT += present; halfT += half; paidT += paidLeave; unpaidT += unpaidLeave; absentT += absent;
       otT += otH; otAmtT += otAmount; pfT += pf; dedT += ded; grossT += gross; paidOnSiteT += paidOnSite; advBalT += advanceBalance;
@@ -533,7 +534,7 @@ export async function POST(request: NextRequest) {
     });
     ss.getRow(rr).height = 22;
     const noteRow = rr + 2;
-    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day × 0.5 + Paid Leave. Monthly Salary (cap) = Daily Wage × 30. Total Salary = (Daily Wage × Working Days), capped at Monthly Salary, + Overtime Amount. Overtime can push Total Salary above the Monthly Salary cap. PF = (Daily Wage × Working Days) × PF% (default 12%). Net Salary Due = Total Salary − PF − Deductions. Salary Paid = Salary Release entries recorded on the portal (On Site / In Office, whichever applies). Total Due = Net Salary Due − Salary Paid.';
+    ss.getCell(noteRow, 1).value = 'Notes: Working Days = Present + Half Day x 0.5 + Paid Leave. Per Day = Monthly Salary / days in selected month. Total Salary = (Per Day x Working Days), capped at Monthly Salary, + Overtime Amount. Overtime can push Total Salary above the Monthly Salary cap. PF = (Per Day x Working Days) x PF% (default 12%). Net Salary Due = Total Salary - PF - Deductions. Salary Paid = Salary Release entries recorded on the portal (On Site / In Office, whichever applies). Total Due = Net Salary Due - Salary Paid.';
     ss.getCell(noteRow, 1).font = { italic: true, size: 9, color: { argb: 'FF6B7A8D' } };
     ss.mergeCells(noteRow, 1, noteRow, ssCols);
 

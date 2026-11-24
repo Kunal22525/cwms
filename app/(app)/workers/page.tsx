@@ -911,9 +911,9 @@ export default function WorkersPage() {
                   type="number"
                   value={form.daily_wage ?? ''}
                   onChange={(e) => setForm({ ...form, daily_wage: e.target.value ? Number(e.target.value) : null })}
-                  placeholder="e.g. 30000"
+                  placeholder="e.g. 120000"
                 />
-                <p className="text-xs text-muted-foreground">Per day = Monthly / days in selected month</p>
+                <p className="text-xs text-muted-foreground">Per day = Monthly / days in selected month (30 days: ?4,000/day, 31 days: ?3,871/day for ?1,20,000)</p>
                 {errors.daily_wage && <p className="text-xs text-destructive">{errors.daily_wage}</p>}
               </div>
               <div className="space-y-2">
@@ -1214,7 +1214,9 @@ export default function WorkersPage() {
                   type="number"
                   value={requestForm.daily_wage ?? ''}
                   onChange={(e) => setRequestForm({ ...requestForm, daily_wage: e.target.value ? Number(e.target.value) : null })}
+                  placeholder="e.g. 120000"
                 />
+                <p className="text-xs text-muted-foreground">Per day = Monthly / days in selected month</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">

@@ -253,7 +253,9 @@ async function handleReports(body: Record<string, unknown>): Promise<Response> {
         ot += r.overtime ?? 0;
         ded += r.deduction ?? 0;
       }
-      const daily = Number(w.daily_wage ?? 0);
+      const monthlySalary = Number(w.daily_wage ?? 0);
+    const daysInMon = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)), 0).getDate();
+    const daily = daysInMon > 0 ? monthlySalary / daysInMon : 0;
       const pfPct = Number(w.pf_percentage ?? 12);
       const daysPaid = present + half * 0.5 + paid;
       const gross = round2(daily * daysPaid);
