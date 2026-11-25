@@ -238,6 +238,9 @@ export default function UsersPage() {
   };
 
   const openEditUser = (u: UserWithRole) => {
+    setRoleChangeUser(null);
+    setDeleteUser(null);
+    setDialogOpen(false);
     setEditUser(u);
     setEditForm({
       full_name: u.full_name || '',
@@ -407,6 +410,8 @@ export default function UsersPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
+                          setEditUser(null);
+                          setDeleteUser(null);
                           setRoleChangeTarget(u.role);
                           setRoleChangeUser({ profile: u, currentRole: u.role });
                         }}
@@ -418,7 +423,11 @@ export default function UsersPage() {
                         variant="ghost"
                         size="icon"
                         disabled={deletingId === u.id}
-                        onClick={() => setDeleteUser(u)}
+                        onClick={() => {
+                          setEditUser(null);
+                          setRoleChangeUser(null);
+                          setDeleteUser(u);
+                        }}
                       >
                         {deletingId === u.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -574,6 +583,10 @@ export default function UsersPage() {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Change Role
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit User Dialog */}
       <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
         <DialogContent>
@@ -616,9 +629,6 @@ export default function UsersPage() {
               </Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
