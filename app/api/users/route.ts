@@ -276,8 +276,6 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  const admin = getSupabaseAdmin();
-
   // Replace all role rows for the user with a single row for the new role.
   await admin.from('user_roles').delete().eq('user_id', userId);
   const { error: roleError } = await admin
