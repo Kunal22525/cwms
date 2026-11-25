@@ -59,6 +59,8 @@ import { formatDate, initials, roleLabel } from '@/lib/utils';
 import type { Profile, AppRole } from '@/types';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
+type UserWithRole = Profile & { role: AppRole };
+
 export default function UsersPage() {
   const { role } = useAuth();
   const { toast } = useToast();
