@@ -362,7 +362,22 @@ export default function UsersPage() {
                       <Avatar className="h-8 w-8">
                         <AvatarFallback className="text-xs">{initials(u.full_name)}</AvatarFallback>
                       </Avatar>
-                      <span className="font-medium">{u.full_name}</span>
+                      <div className="flex flex-col">
+                        <button
+                          type="button"
+                          className="text-left font-medium hover:underline"
+                          onClick={() => openEditUser(u)}
+                        >
+                          {u.full_name}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-left text-xs text-muted-foreground hover:underline"
+                          onClick={() => openEditUser(u)}
+                        >
+                          Edit credentials
+                        </button>
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
