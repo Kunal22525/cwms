@@ -334,9 +334,9 @@ export default function ReportsPage() {
           ot += r.overtime ?? 0;
           ded += r.deduction ?? 0;
         });
-        const monthly = Number(w.daily_wage ?? 0);
+        const monthlySalaryVal = Number(w.daily_wage ?? 0);
         const daysInMon = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)), 0).getDate();
-        const daily = daysInMon > 0 ? monthly / daysInMon : 0;
+        const daily = daysInMon > 0 ? monthlySalaryVal / daysInMon : 0;
         const pfPct = Number(w.pf_percentage ?? 12);
         const daysPaid = present + half * 0.5 + paid;
         const gross = round2(daily * daysPaid);
@@ -345,7 +345,7 @@ export default function ReportsPage() {
         const pay = payMap.get(w.id) ?? { onSite: 0, office: 0 };
         const paidOnSite = round2(pay.onSite);
         const paidOffice = round2(pay.office);
-        const monthly = round2(daily * 30);
+        const monthly = round2(monthlySalaryVal);
         const totalSalary = round2(Math.min(gross, monthly) + otAmt);
         const netDue = round2(totalSalary - pf - ded);
         const totalDue = round2(netDue - paidOnSite - paidOffice);
