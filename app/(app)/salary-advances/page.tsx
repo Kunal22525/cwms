@@ -291,6 +291,7 @@ export default function SalaryAdvancesPage() {
   };
 
   const openNewDialog = () => {
+    if (role !== 'admin' && role !== 'supervisor') return;
     setForm({
       worker_id: '',
       amount: 0,
@@ -303,6 +304,7 @@ export default function SalaryAdvancesPage() {
   };
 
   const openPaymentDialog = () => {
+    if (role !== 'admin' && role !== 'supervisor') return;
     setReleaseMonth(lastMonth());
     setPaymentForm({
       worker_id: '',
@@ -499,10 +501,12 @@ export default function SalaryAdvancesPage() {
             <SelectItem value="Rejected">Rejected</SelectItem>
           </SelectContent>
         </Select>
-        <Button onClick={openNewDialog} disabled={!workers?.length}>
-          <Plus className="mr-2 h-4 w-4" />
-          Request Advance
-        </Button>
+        {(role === 'admin' || role === 'supervisor') && (
+          <Button onClick={openNewDialog} disabled={!workers?.length}>
+            <Plus className="mr-2 h-4 w-4" />
+            Request Advance
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -519,10 +523,12 @@ export default function SalaryAdvancesPage() {
             title="No advance requests"
             description="Submit a salary advance request to get started."
             action={
-              <Button onClick={openNewDialog} disabled={!workers?.length}>
-                <Plus className="mr-2 h-4 w-4" />
-                Request Advance
-              </Button>
+              (role === 'admin' || role === 'supervisor') && (
+                <Button onClick={openNewDialog} disabled={!workers?.length}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Request Advance
+                </Button>
+              )
             }
           />
         ) : (
@@ -598,12 +604,14 @@ export default function SalaryAdvancesPage() {
             <StatCard label="In Office" value={formatCurrency(paymentsStats.inOffice)} icon={Wallet} iconColor="text-primary" iconBg="bg-primary/10" />
           </div>
 
-          <div className="mb-4 flex justify-end">
-            <Button onClick={openPaymentDialog} disabled={!workers?.length}>
-              <HandCoins className="mr-2 h-4 w-4" />
-              Release Salary
-            </Button>
-          </div>
+          {(role === 'admin' || role === 'supervisor') && (
+            <div className="mb-4 flex justify-end">
+              <Button onClick={openPaymentDialog} disabled={!workers?.length}>
+                <HandCoins className="mr-2 h-4 w-4" />
+                Release Salary
+              </Button>
+            </div>
+          )}
 
           <div className="rounded-lg border border-border/60">
           {paymentsLoading ? (
